@@ -25,6 +25,22 @@ rustls = { version = "0.23", default-features = false, features = ["std", "tls12
 # actually offers. No separate `rustls-pki-types` dependency is needed —
 # `rustls::pki_types` re-exports it.
 rustls-native-certs = "0.8"
+# Optional (see the `rusty-tokio` feature below): the async adapter drives
+# the same sans-IO `rustls::ClientConnection` over `rusty_tokio`'s own
+# `AsyncRead`/`AsyncWrite` traits and reactor, the way the mission's
+# sequencing plan calls for -- the async adapter belongs here, behind a
+# feature, not in `rusty_tokio` itself (the runtime stays TLS-free).
+# Pinned to a specific commit rather than tracking `main`, mirroring
+# rusty_rdp's own pinning convention for its `platform` dependency
+# (rustils' docs/versioning.md §3: a bare SHA carries the same guarantee
+# as a tag).
+rusty_tokio = { git = "https://github.com/baileyrd/rusty_tokio", rev = "ac598c930e85460ae3f79328a1d82f28390672f8", optional = true }
+
+[features]
+# Enables `AsyncTlsStream`, the async counterpart to `TlsStream`. Off by
+# default so a sync-only consumer (e.g. `rusty_rdp`) never pulls in
+# `rusty_tokio` and its transitive dependencies.
+rusty-tokio = ["dep:rusty_tokio"]
 
 [dev-dependencies]
 # Generates throwaway certificates (wrong hostname, expired, untrusted
