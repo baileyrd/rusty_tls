@@ -20,6 +20,9 @@ pub enum Error {
     /// silently running with a `RootCertStore` that trusts nothing (which
     /// would make every handshake fail anyway, just later and less clearly).
     NoTrustAnchors,
+    /// The private key handed to [`crate::TlsAcceptor::new`] isn't valid
+    /// DER in any recognized format (PKCS#8, PKCS#1, or SEC1).
+    InvalidPrivateKey(String),
 }
 
 impl fmt::Display for Error {
@@ -31,6 +34,7 @@ impl fmt::Display for Error {
             Error::NoTrustAnchors => {
                 write!(f, "no trust anchors could be loaded; refusing to connect")
             }
+            Error::InvalidPrivateKey(reason) => write!(f, "invalid private key: {reason}"),
         }
     }
 }
@@ -40,7 +44,9 @@ impl std::error::Error for Error {
         match self {
             Error::Io(e) => Some(e),
             Error::Tls(e) => Some(e),
-            Error::InvalidServerName(_) | Error::NoTrustAnchors => None,
+            Error::InvalidServerName(_) | Error::NoTrustAnchors | Error::InvalidPrivateKey(_) => {
+                None
+            }
         }
     }
 }
