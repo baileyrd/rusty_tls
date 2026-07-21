@@ -1,0 +1,115 @@
+//! Server-side TLS: accept connections presenting a certificate and
+//! private key.
+//!
+//! MVP scope matches the client side's: no client-certificate
+//! authentication (this crate stays no-mTLS on both sides), no ALPN, no
+//! session-resumption tuning. Add any of those behind their own opt-in
+//! surface if/when a named consumer needs one — none has yet.
+
+use std::io::{self, Read, Write};
+use std::sync::Arc;
+
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::{ServerConfig, ServerConnection};
+
+use crate::error::Error;
+
+/// The TLS configuration a server accepts connections with: a certificate
+/// chain and its private key. Build once and reuse — accepting a
+/// connection only clones an `Arc`, not the underlying config.
+#[derive(Clone)]
+pub struct TlsAcceptor {
+    config: Arc<ServerConfig>,
+}
+
+impl TlsAcceptor {
+    /// `cert_chain_der` is the leaf certificate followed by any
+    /// intermediates, each DER-encoded, leaf first. `private_key_der` is
+    /// the leaf's private key, DER-encoded — PKCS#8, PKCS#1, or SEC1,
+    /// auto-detected from the DER structure.
+    pub fn new(cert_chain_der: Vec<Vec<u8>>, private_key_der: Vec<u8>) -> Result<Self, Error> {
+        let cert_chain: Vec<CertificateDer<'static>> = cert_chain_der
+            .into_iter()
+            .map(CertificateDer::from)
+            .collect();
+        let key = PrivateKeyDer::try_from(private_key_der)
+            .map_err(|reason| Error::InvalidPrivateKey(reason.to_string()))?;
+        let config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, key)?;
+        Ok(Self {
+            config: Arc::new(config),
+        })
+    }
+
+    /// Wrap `sock` (already accepted) in a TLS server connection.
+    ///
+    /// Performs no I/O itself — the handshake runs lazily, driven by the
+    /// first `Read`/`Write` call, exactly like
+    /// [`TlsStream::new`](crate::TlsStream::new).
+    pub fn accept<S: Read + Write>(&self, sock: S) -> Result<TlsServerStream<S>, Error> {
+        let conn = ServerConnection::new(self.config.clone())?;
+        Ok(TlsServerStream { conn, sock })
+    }
+}
+
+/// A TLS server connection layered over any `Read + Write` stream — the
+/// server counterpart to [`crate::TlsStream`]. Built via
+/// [`TlsAcceptor::accept`]; keeps rustls types out of the public API the
+/// same way the client adapter does.
+pub struct TlsServerStream<S> {
+    conn: ServerConnection,
+    sock: S,
+}
+
+impl<S: Read + Write> TlsServerStream<S> {
+    /// Whether the TLS handshake has not yet completed.
+    pub fn is_handshaking(&self) -> bool {
+        self.conn.is_handshaking()
+    }
+
+    /// Borrow the underlying stream.
+    pub fn get_ref(&self) -> &S {
+        &self.sock
+    }
+
+    /// Mutably borrow the underlying stream. See
+    /// [`TlsStream::get_mut`](crate::TlsStream::get_mut)'s docs — the same
+    /// caution applies.
+    pub fn get_mut(&mut self) -> &mut S {
+        &mut self.sock
+    }
+
+    /// Consume `self`, returning the underlying stream. See
+    /// [`TlsStream::into_inner`](crate::TlsStream::into_inner)'s docs.
+    pub fn into_inner(self) -> S {
+        self.sock
+    }
+
+    /// Blocks until the TLS handshake completes (or fails), without
+    /// requiring the caller to send or expect application data first. See
+    /// [`TlsStream::complete_handshake`](crate::TlsStream::complete_handshake)'s
+    /// docs for why this exists.
+    pub fn complete_handshake(&mut self) -> Result<(), Error> {
+        if self.conn.is_handshaking() {
+            self.conn.complete_io(&mut self.sock)?;
+        }
+        Ok(())
+    }
+}
+
+impl<S: Read + Write> Read for TlsServerStream<S> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        rustls::Stream::new(&mut self.conn, &mut self.sock).read(buf)
+    }
+}
+
+impl<S: Read + Write> Write for TlsServerStream<S> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        rustls::Stream::new(&mut self.conn, &mut self.sock).write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        rustls::Stream::new(&mut self.conn, &mut self.sock).flush()
+    }
+}

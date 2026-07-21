@@ -10,10 +10,12 @@ any consumer changing a line. See `ARCHITECTURE.md` for the full design and
 repo exists and what it deliberately leaves to rustils.
 
 ## Status
-Early — client-only. Both the sync adapter (`TlsStream`) and the async
+Early. Client side: both the sync adapter (`TlsStream`) and the async
 adapter (`AsyncTlsStream`, behind the `rusty-tokio` feature) exist, backed
 by the same `TrustPolicy`, with a hermetic rejection-test suite for each.
-No server-side support, and no consumer has been migrated onto it yet.
+`rusty_request` (async) and `rusty_rdp` (sync, client-side only) are both
+migrated onto it. Server side: `TlsAcceptor`/`TlsServerStream` (sync only —
+no async server adapter yet); no consumer migrated onto it yet.
 
 ## Getting started
 ```bash
@@ -34,6 +36,17 @@ tls.write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n
 
 With the `rusty-tokio` feature, `AsyncTlsStream` is the same thing over
 `rusty_tokio`'s `AsyncRead`/`AsyncWrite` instead of blocking `Read`/`Write`.
+
+Server side:
+
+```rust
+use std::net::TcpListener;
+use rusty_tls::TlsAcceptor;
+
+let acceptor = TlsAcceptor::new(vec![cert_chain_der], private_key_der)?;
+let (sock, _) = TcpListener::bind("0.0.0.0:8443")?.accept()?;
+let mut tls = acceptor.accept(sock)?;
+```
 
 ## Architecture
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for boundaries, key decisions, and data flow.

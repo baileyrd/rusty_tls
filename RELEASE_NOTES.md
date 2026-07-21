@@ -22,6 +22,34 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Add server-side TLS: `TlsAcceptor`/`TlsServerStream`
+**2026-07-21**
+
+- **Added:** `TlsAcceptor::new(cert_chain_der, private_key_der)` (builds
+  the server config once — no client-certificate authentication, matching
+  the client side's own MVP scope; the private key format is
+  auto-detected among PKCS#8/PKCS#1/SEC1) and `TlsAcceptor::accept(sock)`,
+  which produces a `TlsServerStream<S>` — the server counterpart to
+  `TlsStream`, same lazy-handshake shape, same `complete_handshake()`.
+  `Error::InvalidPrivateKey` covers the one new failure mode (key isn't
+  valid DER in any recognized format).
+- **Known limitation, stated plainly:** sync only — no async server
+  adapter yet (nothing drives `ServerConnection` over `rusty_tokio`). No
+  client-certificate authentication (mTLS) on either side. Built without a
+  confirmed live consumer today (`rusty_rdp`'s existing server-side code
+  works fine on raw `rustls` and wasn't required to migrate; `rusty_llama`'s
+  server TLS shape, flagged in this project's design record, has never
+  been verified against its actual source) — an explicit, requested
+  exception to this project's usual consumer-gating discipline, not a
+  quiet one.
+- **Tests:** 4 new hermetic tests, including a full client↔server
+  round trip using this crate's own `TlsStream` against its own
+  `TlsAcceptor`/`TlsServerStream` — proving the two halves interoperate,
+  not just that each compiles in isolation. All 16 tests (7 sync client +
+  4 async client + 4 server + 1 doctest) passing; `cargo clippy
+  --all-targets --all-features -- -D warnings` and `cargo fmt --check`
+  both clean.
+
 ## Add `TlsStream::complete_handshake`/`peer_certificate_der`
 **2026-07-21**
 

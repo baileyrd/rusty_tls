@@ -5,15 +5,18 @@
 //! what sits behind the seam can change later (a different backend, native
 //! OS verification on some platforms) without any consumer changing a line.
 //!
-//! # Scope (client only, for now)
+//! # Scope
 //!
-//! This crate currently provides a **client-only** sync adapter,
-//! [`TlsStream`], layered over any `Read + Write` stream, plus
-//! [`TrustPolicy`], the one place trust decisions are made. Behind the
-//! `rusty-tokio` feature, [`AsyncTlsStream`] is the same thing over
-//! `rusty_tokio`'s `AsyncRead + AsyncWrite`. Server-side support is known
-//! future work — see the crate's `ARCHITECTURE.md` for the full roadmap and
-//! what's deliberately not built yet.
+//! Client side: [`TlsStream`], a sync adapter layered over any
+//! `Read + Write` stream, plus [`TrustPolicy`], the one place trust
+//! decisions are made. Behind the `rusty-tokio` feature, [`AsyncTlsStream`]
+//! is the same thing over `rusty_tokio`'s `AsyncRead + AsyncWrite`.
+//!
+//! Server side: [`TlsAcceptor`] (a certificate + private key, built once)
+//! and [`TlsServerStream`], the sync per-connection wrapper it produces.
+//! No client-certificate authentication (matching the client side having no
+//! client-cert support), and no async server adapter yet — see the crate's
+//! `ARCHITECTURE.md` for the full roadmap and what's deliberately not built.
 //!
 //! # Example
 //!
@@ -33,10 +36,12 @@ mod async_client;
 mod client;
 mod danger;
 mod error;
+mod server;
 mod trust;
 
 #[cfg(feature = "rusty-tokio")]
 pub use async_client::AsyncTlsStream;
 pub use client::TlsStream;
 pub use error::Error;
+pub use server::{TlsAcceptor, TlsServerStream};
 pub use trust::TrustPolicy;
