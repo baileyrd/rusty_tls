@@ -1,0 +1,43 @@
+[package]
+name = "rusty_tls"
+version = "0.1.0"
+edition = "2021"
+description = "A TLS library implementation in Rust"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/baileyrd/rusty_tls"
+
+# Every dependency here is written up (rustils' `docs/behavior/*.md` style):
+# add nothing without a comment justifying it, per the ecosystem's
+# dependency-justification convention.
+[dependencies]
+# The one dependency this crate exists to wrap. `default-features = false`
+# to make the choices explicit rather than inherit whatever rustls' defaults
+# happen to be next release: `std` (this is not a `no_std` crate), `tls12`
+# (peers that haven't moved to 1.3 yet still need to work), and `ring` as
+# the crypto provider (the mature, widely-used choice; `aws-lc-rs` is the
+# other option rustls supports but adds a C/Bindgen build dependency this
+# crate doesn't need).
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "ring"] }
+# `TrustPolicy::System`'s only implementation: reads OS trust anchors
+# (Windows ROOT store / macOS Security.framework / Linux distro cert
+# bundle, honoring `SSL_CERT_FILE`/`SSL_CERT_DIR`) as DER, matching the
+# ecosystem's rustils design-discussion-tls.md survey of what each platform
+# actually offers. No separate `rustls-pki-types` dependency is needed —
+# `rustls::pki_types` re-exports it.
+rustls-native-certs = "0.8"
+
+[dev-dependencies]
+# Generates throwaway certificates (wrong hostname, expired, untrusted
+# root) for the rejection-path test suite — hermetic tests need a variety
+# of bad certs that hand-writing DER byte arrays for each one would make
+# unreadable and hard to review. Dev-only: never a dependency of the
+# shipped library.
+rcgen = "0.13"
+# Only to name `time::OffsetDateTime` for the expired-certificate test's
+# custom validity window — rcgen depends on `time` itself but doesn't
+# re-export it. Dev-only.
+time = "0.3"
+
+[lints.rust]
+unsafe_code = "forbid"
+missing_docs = "warn"

@@ -22,6 +22,33 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Bootstrap the library: sync TLS client, TrustPolicy, hermetic tests
+**2026-07-21**
+
+- **Added:** the crate's first real code. `TlsStream<S: Read + Write>` (a
+  sync TLS client adapter wrapping `rustls::Stream` internally) and
+  `TrustPolicy` (`System` via `rustls-native-certs`, `PinnedAnchors` for
+  hermetic tests/private CAs, `DangerNoVerification` for out-of-band-trust
+  deployments like RDP) — the two pieces `rusty_rdp`'s eventual migration
+  and `rusty_request`'s `https://` support both need. No rustls type is
+  part of the public API.
+- **Added:** a hermetic handshake test suite (no network, no real CA) —
+  one success path plus four rejection tests (wrong hostname, expired
+  cert, untrusted root, zero pinned anchors), deliberately outnumbering
+  the happy path per the design record's point that TLS failures are
+  silent by default.
+- **Known limitation, stated plainly:** client-only — no server-side TLS,
+  no async adapter yet (`rusty_tokio` integration is the next real
+  consumer-forcing step), no ALPN/session resumption/client-cert auth.
+  `Csprng` integration (mirroring `rusty_rdp`'s pattern) was considered and
+  dropped: rustls brings its own RNG, and this crate has no real call site
+  that needs one — see `ARCHITECTURE.md`'s Non-goals rather than carrying
+  a speculative feature.
+- **Tests:** 6 new tests (1 unit-style config-validation test + 5
+  integration tests against a local rustls test server); all passing,
+  0 ignored. `cargo clippy --all-targets --all-features -- -D warnings`
+  and `cargo fmt --check` both clean.
+
 ## Add basic CI workflow
 **2026-07-21**
 

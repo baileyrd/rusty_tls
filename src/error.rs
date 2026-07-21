@@ -1,0 +1,69 @@
+use std::fmt;
+use std::io;
+
+/// Everything that can go wrong building a TLS configuration or connection.
+///
+/// Deliberately flat rather than nested per-cause enums (e.g. no separate
+/// `TrustError`) — callers of this crate handle "TLS didn't work," not a
+/// taxonomy of why.
+#[derive(Debug)]
+pub enum Error {
+    /// The underlying stream returned an I/O error.
+    Io(io::Error),
+    /// rustls rejected the handshake, a certificate, or a config value.
+    Tls(rustls::Error),
+    /// The hostname passed to [`crate::TlsStream::new`] is not a valid DNS
+    /// name or IP address.
+    InvalidServerName(String),
+    /// [`crate::TrustPolicy::System`] or [`crate::TrustPolicy::PinnedAnchors`]
+    /// ended up with zero usable trust anchors — fail closed rather than
+    /// silently running with a `RootCertStore` that trusts nothing (which
+    /// would make every handshake fail anyway, just later and less clearly).
+    NoTrustAnchors,
+}
+
+impl fmt::Display for Error {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Error::Io(e) => write!(f, "I/O error: {e}"),
+            Error::Tls(e) => write!(f, "TLS error: {e}"),
+            Error::InvalidServerName(name) => write!(f, "invalid server name: {name}"),
+            Error::NoTrustAnchors => {
+                write!(f, "no trust anchors could be loaded; refusing to connect")
+            }
+        }
+    }
+}
+
+impl std::error::Error for Error {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        match self {
+            Error::Io(e) => Some(e),
+            Error::Tls(e) => Some(e),
+            Error::InvalidServerName(_) | Error::NoTrustAnchors => None,
+        }
+    }
+}
+
+impl From<io::Error> for Error {
+    fn from(e: io::Error) -> Self {
+        Error::Io(e)
+    }
+}
+
+impl From<rustls::Error> for Error {
+    fn from(e: rustls::Error) -> Self {
+        Error::Tls(e)
+    }
+}
+
+/// Turn any [`Error`] into an [`io::Error`], for callers threading this
+/// through a `Read`/`Write` implementation that must return `io::Result`.
+impl From<Error> for io::Error {
+    fn from(e: Error) -> Self {
+        match e {
+            Error::Io(e) => e,
+            other => io::Error::other(other),
+        }
+    }
+}

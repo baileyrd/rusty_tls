@@ -1,0 +1,91 @@
+use std::sync::Arc;
+
+use rustls::pki_types::CertificateDer;
+use rustls::{ClientConfig, RootCertStore};
+
+use crate::danger::NoServerCertVerification;
+use crate::error::Error;
+
+/// How a [`TlsStream`](crate::TlsStream) decides whether to trust the
+/// server it connects to. Verify-by-default: [`TrustPolicy::System`] is the
+/// only variant [`Default`] produces, and the unsafe variant is named so it
+/// reads as dangerous at every call site.
+#[derive(Debug, Clone, Default)]
+pub enum TrustPolicy {
+    /// Verify against the operating system's trust anchors, loaded via
+    /// [`rustls-native-certs`](https://docs.rs/rustls-native-certs) (Windows'
+    /// ROOT store, macOS's Security.framework/keychain, or Linux's
+    /// distro-specific bundle file/directory, honoring `SSL_CERT_FILE` and
+    /// `SSL_CERT_DIR` first if either is set).
+    ///
+    /// **This is a best-effort anchor set, on every platform.** Windows'
+    /// ROOT store is lazily populated (enumeration can miss roots the chain
+    /// engine would fetch on demand); macOS's anchor enumeration returns
+    /// built-in roots but not full keychain trust-settings semantics; a flat
+    /// DER list can never express a distrust record on any platform. This
+    /// is the same honest contract `rustls-native-certs` itself carries —
+    /// this crate does not paper over it.
+    ///
+    /// Individual anchors that fail to load or parse are skipped silently
+    /// (matching real-world trust stores, which routinely contain a few);
+    /// only a *total* loss of anchors — zero certificates usable — is a
+    /// hard error ([`Error::NoTrustAnchors`]), so a connection never
+    /// silently runs with a store that trusts nothing.
+    #[default]
+    System,
+    /// Verify against exactly these caller-supplied root certificates
+    /// (DER-encoded), ignoring the OS trust store entirely. For hermetic
+    /// tests or a private CA.
+    ///
+    /// Unlike [`TrustPolicy::System`], a certificate here that fails to
+    /// parse is a hard error — the caller named these roots deliberately,
+    /// so a bad one is a caller bug worth surfacing, not routine noise to
+    /// skip past.
+    PinnedAnchors(Vec<CertificateDer<'static>>),
+    /// Accept any server certificate, unconditionally. No chain building,
+    /// no expiry check, no hostname match — **no protection against an
+    /// active man-in-the-middle.**
+    ///
+    /// Exists for servers that present self-signed certificates and rely on
+    /// out-of-band trust (e.g. RDP's typical deployment) — never as a
+    /// default, and never silently: every call site naming this variant is
+    /// declaring, in the type system, that it isn't verifying its peer.
+    DangerNoVerification,
+}
+
+pub(crate) fn build_client_config(policy: &TrustPolicy) -> Result<Arc<ClientConfig>, Error> {
+    let config = match policy {
+        TrustPolicy::System => {
+            let loaded = rustls_native_certs::load_native_certs();
+            let mut roots = RootCertStore::empty();
+            for cert in loaded.certs {
+                // Best-effort per the type's documentation: a handful of
+                // unparseable anchors in an OS store is normal, not fatal.
+                let _ = roots.add(cert);
+            }
+            if roots.is_empty() {
+                return Err(Error::NoTrustAnchors);
+            }
+            ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth()
+        }
+        TrustPolicy::PinnedAnchors(certs) => {
+            let mut roots = RootCertStore::empty();
+            for cert in certs {
+                roots.add(cert.clone())?;
+            }
+            if roots.is_empty() {
+                return Err(Error::NoTrustAnchors);
+            }
+            ClientConfig::builder()
+                .with_root_certificates(roots)
+                .with_no_client_auth()
+        }
+        TrustPolicy::DangerNoVerification => ClientConfig::builder()
+            .dangerous()
+            .with_custom_certificate_verifier(Arc::new(NoServerCertVerification::new()))
+            .with_no_client_auth(),
+    };
+    Ok(Arc::new(config))
+}
