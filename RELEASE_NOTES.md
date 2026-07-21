@@ -22,6 +22,15 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Add basic CI workflow
+**2026-07-21**
+
+- **Added:** `.github/workflows/ci.yml` running `cargo fmt --check`, `clippy
+  -D warnings`, `build`, and `test` on push to `main` and on PRs.
+- **Known limitation:** no `Cargo.toml`/source exists yet, so the Rust steps
+  are gated behind a `Cargo.toml` existence check and no-op for now — they'll
+  start running for real once source lands, with nothing further to wire up.
+
 ## Repo governance setup
 **2026-07-21**
 
