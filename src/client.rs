@@ -66,6 +66,42 @@ impl<S: Read + Write> TlsStream<S> {
     pub fn into_inner(self) -> S {
         self.sock
     }
+
+    /// Blocks until the TLS handshake completes (or fails).
+    ///
+    /// Normally the handshake just runs lazily, driven by the first
+    /// `Read`/`Write` call — this exists for a caller that needs
+    /// handshake-derived state (e.g. [`TlsStream::peer_certificate_der`])
+    /// before its own protocol logic starts reading or writing
+    /// application data. RDP's CredSSP exchange is exactly this shape: it
+    /// needs the server's certificate for channel binding before the
+    /// CredSSP bytes themselves go over the wire.
+    pub fn complete_handshake(&mut self) -> Result<(), Error> {
+        if self.conn.is_handshaking() {
+            self.conn.complete_io(&mut self.sock)?;
+        }
+        Ok(())
+    }
+
+    /// The DER-encoded end-entity certificate the peer presented during
+    /// the handshake, if it has completed (see
+    /// [`TlsStream::complete_handshake`]) and the peer sent one — every
+    /// [`TrustPolicy`](crate::TrustPolicy) other than
+    /// [`TrustPolicy::DangerNoVerification`](crate::TrustPolicy::DangerNoVerification)
+    /// requires one, so `None` past the handshake only happens with that
+    /// policy and a peer that chose not to present a certificate.
+    ///
+    /// Raw bytes rather than a parsed certificate: this crate's seam
+    /// stops at "here is what the peer presented," matching the
+    /// byte-oriented convention the wider ecosystem uses at boundaries
+    /// like this one — parsing (e.g. extracting the `SubjectPublicKeyInfo`
+    /// for a channel-binding check) is the caller's responsibility.
+    pub fn peer_certificate_der(&self) -> Option<&[u8]> {
+        self.conn
+            .peer_certificates()
+            .and_then(|certs| certs.first())
+            .map(|cert| cert.as_ref())
+    }
 }
 
 impl<S: Read + Write> Read for TlsStream<S> {

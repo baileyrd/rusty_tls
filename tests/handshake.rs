@@ -196,6 +196,34 @@ fn rejects_untrusted_root() {
 }
 
 #[test]
+fn complete_handshake_exposes_the_peers_certificate() {
+    let ca = TestCa::generate();
+    let (leaf_der, leaf_key) = ca.issue_leaf("localhost", None);
+    let (addr, server) = spawn_echo_server(leaf_der.clone(), leaf_key);
+
+    let tcp = TcpStream::connect(addr).unwrap();
+    let policy = TrustPolicy::PinnedAnchors(vec![ca.root_der()]);
+    let mut tls = TlsStream::new(tcp, "localhost", &policy).unwrap();
+
+    assert!(tls.is_handshaking());
+    assert_eq!(tls.peer_certificate_der(), None);
+
+    tls.complete_handshake().unwrap();
+
+    assert!(!tls.is_handshaking());
+    assert_eq!(tls.peer_certificate_der(), Some(leaf_der.as_ref()));
+
+    // The connection is still perfectly usable for application data
+    // afterward -- completing the handshake early doesn't consume it.
+    tls.write_all(b"after handshake").unwrap();
+    let mut buf = [0u8; "after handshake".len()];
+    tls.read_exact(&mut buf).unwrap();
+    assert_eq!(&buf, b"after handshake");
+
+    server.join().unwrap();
+}
+
+#[test]
 fn pinned_anchors_with_zero_certs_is_a_hard_error() {
     let result = rusty_tls::TlsStream::new(
         std::io::Cursor::new(Vec::<u8>::new()),

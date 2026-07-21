@@ -22,6 +22,27 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Add `TlsStream::complete_handshake`/`peer_certificate_der`
+**2026-07-21**
+
+- **Added:** `TlsStream::complete_handshake()` (blocks until the
+  handshake finishes, without requiring the caller to send/expect
+  application data first) and `TlsStream::peer_certificate_der()` (the
+  peer's end-entity certificate, as raw DER bytes — never a parsed
+  rustls type, keeping the seam intact). Driven by a real, named
+  consumer: `rusty_rdp`'s CredSSP exchange needs the server's public key
+  for channel binding *before* the CredSSP bytes go over the wire, which
+  the sync adapter had no way to give it without exposing rustls
+  internals directly.
+- Sync adapter only (`TlsStream`, not `AsyncTlsStream`) — no async
+  consumer has needed this yet; add it there if and when one does,
+  rather than speculatively now.
+- **Tests:** 1 new hermetic test (handshake starts pending, completes on
+  `complete_handshake()`, exposes the expected DER, and the connection
+  remains fully usable for application data afterward). All 12 tests
+  (7 sync + 4 async + 1 doctest) passing; `cargo clippy --all-targets
+  --all-features -- -D warnings` and `cargo fmt --check` both clean.
+
 ## Add the async adapter (`AsyncTlsStream`, feature `rusty-tokio`)
 **2026-07-21**
 
