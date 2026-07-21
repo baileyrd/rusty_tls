@@ -9,11 +9,11 @@
 //!
 //! This crate currently provides a **client-only** sync adapter,
 //! [`TlsStream`], layered over any `Read + Write` stream, plus
-//! [`TrustPolicy`], the one place trust decisions are made. An async
-//! adapter (over `rusty_tokio`, behind a `rusty-tokio` feature) and
-//! server-side support are known future work — see the crate's
-//! `ARCHITECTURE.md` for the full roadmap and what's deliberately not built
-//! yet.
+//! [`TrustPolicy`], the one place trust decisions are made. Behind the
+//! `rusty-tokio` feature, [`AsyncTlsStream`] is the same thing over
+//! `rusty_tokio`'s `AsyncRead + AsyncWrite`. Server-side support is known
+//! future work — see the crate's `ARCHITECTURE.md` for the full roadmap and
+//! what's deliberately not built yet.
 //!
 //! # Example
 //!
@@ -28,11 +28,15 @@
 //! # Ok::<(), Box<dyn std::error::Error>>(())
 //! ```
 
+#[cfg(feature = "rusty-tokio")]
+mod async_client;
 mod client;
 mod danger;
 mod error;
 mod trust;
 
+#[cfg(feature = "rusty-tokio")]
+pub use async_client::AsyncTlsStream;
 pub use client::TlsStream;
 pub use error::Error;
 pub use trust::TrustPolicy;

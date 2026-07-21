@@ -10,9 +10,10 @@ any consumer changing a line. See `ARCHITECTURE.md` for the full design and
 repo exists and what it deliberately leaves to rustils.
 
 ## Status
-Early — client-only sync adapter (`TlsStream`) and `TrustPolicy` exist, with
-a hermetic rejection-test suite. No async adapter, no server-side support,
-and no consumer has been migrated onto it yet.
+Early — client-only. Both the sync adapter (`TlsStream`) and the async
+adapter (`AsyncTlsStream`, behind the `rusty-tokio` feature) exist, backed
+by the same `TrustPolicy`, with a hermetic rejection-test suite for each.
+No server-side support, and no consumer has been migrated onto it yet.
 
 ## Getting started
 ```bash
@@ -30,6 +31,9 @@ let sock = TcpStream::connect("example.com:443")?;
 let mut tls = TlsStream::new(sock, "example.com", &TrustPolicy::System)?;
 tls.write_all(b"GET / HTTP/1.1\r\nHost: example.com\r\nConnection: close\r\n\r\n")?;
 ```
+
+With the `rusty-tokio` feature, `AsyncTlsStream` is the same thing over
+`rusty_tokio`'s `AsyncRead`/`AsyncWrite` instead of blocking `Read`/`Write`.
 
 ## Architecture
 See [ARCHITECTURE.md](./ARCHITECTURE.md) for boundaries, key decisions, and data flow.

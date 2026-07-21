@@ -8,17 +8,17 @@ only `TlsStream`, `TrustPolicy`, and `Error`. Day one, the engine behind the
 seam is rustls; the seam is what makes that replaceable later without
 touching consumer code.
 
-**Not goals (yet):** server-side TLS, an async adapter, ALPN/session
-resumption/client-cert auth, revocation, or any hand-rolled cryptography —
-see [Non-goals](#non-goals).
+**Not goals (yet):** server-side TLS, ALPN/session resumption/client-cert
+auth, revocation, or any hand-rolled cryptography — see
+[Non-goals](#non-goals).
 
 ## Boundaries
 
 | Port | Adapter(s) | Notes |
 | ---- | ---------- | ----- |
-| Trust decision (`TrustPolicy` → `rustls::ClientConfig`) | `trust::build_client_config` | The one place a `rustls::RootCertStore`/verifier gets constructed. `System` reads OS anchors via `rustls-native-certs`; `PinnedAnchors` takes caller-supplied DER; `DangerNoVerification` installs `danger::NoServerCertVerification`. |
+| Trust decision (`TrustPolicy` → `rustls::ClientConfig`) | `trust::build_client_config` | The one place a `rustls::RootCertStore`/verifier gets constructed. `System` reads OS anchors via `rustls-native-certs`; `PinnedAnchors` takes caller-supplied DER; `DangerNoVerification` installs `danger::NoServerCertVerification`. Shared by both adapters below — this is the real reusable "core." |
 | Sync transport (`TlsStream<S: Read + Write>`) | `client::TlsStream` (wraps `rustls::Stream` internally) | Never dials — accepts an already-connected `S`, so protocols that run a plaintext exchange before upgrading (RDP's X.224 negotiation) can hand over a used stream. |
-| Async transport (planned) | *(not built)* | Will drive the same `rustls::ClientConnection` sans-IO surface (`wants_read`/`wants_write`/`read_tls`/`write_tls`/`process_new_packets`) over `rusty_tokio`'s reactor, behind a `rusty-tokio` feature. `rusty_tokio` stays TLS-free either way. |
+| Async transport (`AsyncTlsStream<S: AsyncRead + AsyncWrite>`, feature `rusty-tokio`) | `async_client::AsyncTlsStream` | Drives the same sans-IO `rustls::ClientConnection` (`wants_read`/`wants_write`/`read_tls`/`write_tls`/`process_new_packets`) over `rusty_tokio`'s poll-based `AsyncRead`/`AsyncWrite`, via a small internal `PollAdapter` that turns `Poll::Pending` into `io::ErrorKind::WouldBlock` for rustls' synchronous `read_tls`/`write_tls` to see. `rusty_tokio` itself stays TLS-free; the dependency is optional and off by default. |
 
 ## Structure
 Single crate, modular by concern rather than a workspace — there is exactly
@@ -30,17 +30,21 @@ one artifact to ship and no team/language boundary to split across:
 - `danger` — the `DangerNoVerification` verifier, isolated in its own module
   so it's never an accidental `use` away from the rest of the crate.
 - `client` — `TlsStream`, the sync adapter.
+- `async_client` (feature `rusty-tokio`) — `AsyncTlsStream`, the async
+  adapter.
 
-There is currently no separate public sans-IO "core" type distinct from
-`TlsStream` — `rustls::ClientConnection` already *is* the sans-IO engine,
-and `trust::build_client_config` is the real shared logic (config
-construction, independent of transport). `TlsStream` uses
-`rustls::Stream` internally to drive it over a blocking `Read + Write`.
-When the async adapter is built, the sans-IO drive loop
-(`wants_read`/`read_tls`/`process_new_packets`/...) will be factored into
-its own module shared by both adapters — deferred until there are actually
-two consumers of it, per the "don't build for a consumer that doesn't
-exist yet" rule this ecosystem applies elsewhere.
+There is no separate public sans-IO "core" type distinct from the two
+adapters — `rustls::ClientConnection` already *is* the sans-IO engine, and
+`trust::build_client_config` is the real shared logic (config
+construction, independent of transport). Each adapter drives the same
+`ClientConnection` methods (`wants_read`/`wants_write`/`read_tls`/
+`write_tls`/`process_new_packets`) itself: `client::TlsStream` via
+`rustls::Stream` over a blocking `Read + Write`; `async_client::AsyncTlsStream`
+via its own poll loop (`poll_complete_io`) over `rusty_tokio`'s
+`AsyncRead + AsyncWrite`. The two loops are similar in shape but distinct
+in kind (blocking vs. `Poll`/`Waker`-driven) — sharing config construction
+was the real duplication to remove; sharing the drive loop itself would
+have meant forcing one adapter's I/O model onto the other.
 
 ## Data flow
 1. Caller connects `S` (e.g. `std::net::TcpStream`) and, for protocols that
@@ -62,8 +66,6 @@ See [docs/adr/](./docs/adr/) for the record of individual decisions and their tr
 ## Non-goals
 - **Server-side TLS.** A known future need (rusty_llama's optional server,
   rdp's server half) — left room for, not built.
-- **An async adapter.** Planned (behind a `rusty-tokio` feature), not yet
-  built; `rusty_request`'s `https://` support depends on it.
 - **ALPN, session resumption, client certificates (mTLS), revocation,
   kTLS offload.** Out of scope for the MVP; add only if a named consumer
   needs one, the same consumer-gate discipline rustils applies to its own
@@ -72,6 +74,3 @@ See [docs/adr/](./docs/adr/) for the record of individual decisions and their tr
   engine. If a future differential-testing experiment wants to explore an
   alternative backend behind the same seam, that happens explicitly,
   never silently promoted to default.
-- **A public sans-IO `Connection` type, before the async adapter exists.**
-  See [Structure](#structure) — avoided for now as a speculative surface
-  with no second caller.

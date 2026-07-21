@@ -22,6 +22,33 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Add the async adapter (`AsyncTlsStream`, feature `rusty-tokio`)
+**2026-07-21**
+
+- **Added:** `AsyncTlsStream<S: AsyncRead + AsyncWrite>`, driving the same
+  sans-IO `rustls::ClientConnection` the sync `TlsStream` uses, but over
+  `rusty_tokio`'s poll-based `AsyncRead`/`AsyncWrite` and reactor instead
+  of blocking I/O. Same `TrustPolicy`, same constructor shape, same "never
+  dials" rule. Gated behind a new `rusty-tokio` feature (off by default) so
+  a sync-only consumer never pulls in `rusty_tokio`.
+- **Added:** a hermetic async handshake test suite mirroring the sync
+  one — success + round-trip, `DangerNoVerification`, wrong-hostname
+  rejection, untrusted-root rejection — run via `#[rusty_tokio::test]`
+  against a plain sync rustls server on a background thread (only the
+  client side is what this adapter is responsible for).
+- **Implementation note:** rustls has no built-in poll-based adapter (it
+  only ships the sans-IO connection plus the blocking `rustls::Stream`),
+  so this crate's own `poll_complete_io` drive loop plus a small
+  `PollAdapter` (translates `Poll::Pending` to `io::ErrorKind::WouldBlock`
+  for rustls' synchronous `read_tls`/`write_tls` to see, the same
+  translation tokio-rustls uses) had to be written — not reused from
+  anywhere.
+- **Tests:** 4 new tests, all passing; `cargo clippy --all-targets
+  --all-features -- -D warnings` and `cargo fmt --check` both clean.
+- This completes sequencing step 3 from the project handoff. Remaining:
+  the `rusty_request` and `rusty_rdp` consumer PRs (steps 4–5), and the
+  follow-up rows in step 6.
+
 ## Bootstrap the library: sync TLS client, TrustPolicy, hermetic tests
 **2026-07-21**
 
