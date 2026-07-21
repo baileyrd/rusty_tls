@@ -1,0 +1,41 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for Cargo.toml
+        id: check
+        run: echo "exists=$(test -f Cargo.toml && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - uses: dtolnay/rust-toolchain@stable
+        if: steps.check.outputs.exists == 'true'
+        with:
+          components: rustfmt, clippy
+
+      - name: Format check
+        if: steps.check.outputs.exists == 'true'
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        if: steps.check.outputs.exists == 'true'
+        run: cargo clippy --all-targets --all-features -- -D warnings
+
+      - name: Build
+        if: steps.check.outputs.exists == 'true'
+        run: cargo build --all-targets --verbose
+
+      - name: Test
+        if: steps.check.outputs.exists == 'true'
+        run: cargo test --all-features --verbose
+
+      - name: No source yet
+        if: steps.check.outputs.exists == 'false'
+        run: echo "No Cargo.toml yet — skipping Rust build/test until source lands."
