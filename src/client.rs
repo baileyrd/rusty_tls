@@ -1,7 +1,8 @@
 use std::io::{self, Read, Write};
+use std::sync::Arc;
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-use rustls::ClientConnection;
+use rustls::{ClientConfig, ClientConnection, HandshakeKind};
 
 use crate::error::Error;
 use crate::trust::{
@@ -37,6 +38,22 @@ impl<S: Read + Write> TlsStream<S> {
     /// (which this wraps internally).
     pub fn new(sock: S, server_name: &str, policy: &TrustPolicy) -> Result<Self, Error> {
         let config = build_client_config(policy)?;
+        let name = ServerName::try_from(server_name.to_string())
+            .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
+        let conn = ClientConnection::new(config, name)?;
+        Ok(Self { conn, sock })
+    }
+
+    /// Wrap `sock` in a TLS client connection using an already-built
+    /// `config` — the constructor [`TlsConnector`](crate::TlsConnector)
+    /// uses so repeated connections share the same session-resumption
+    /// cache, rather than each getting a fresh, empty one the way [`TlsStream::new`]'s
+    /// per-call [`build_client_config`] would.
+    pub(crate) fn from_config(
+        config: Arc<ClientConfig>,
+        sock: S,
+        server_name: &str,
+    ) -> Result<Self, Error> {
         let name = ServerName::try_from(server_name.to_string())
             .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
         let conn = ClientConnection::new(config, name)?;
@@ -95,6 +112,17 @@ impl<S: Read + Write> TlsStream<S> {
     /// accepted none of the ones offered.
     pub fn negotiated_alpn_protocol(&self) -> Option<&[u8]> {
         self.conn.alpn_protocol()
+    }
+
+    /// Whether this connection resumed a previous TLS session rather than
+    /// performing a full handshake — `false` until the handshake completes
+    /// (see [`TlsStream::complete_handshake`]). Only meaningful when
+    /// connecting via a shared [`TlsConnector`](crate::TlsConnector):
+    /// [`TlsStream::new`] builds a fresh, empty session cache on every
+    /// call, so a connection made through it never has a previous session
+    /// to resume.
+    pub fn resumed_session(&self) -> bool {
+        matches!(self.conn.handshake_kind(), Some(HandshakeKind::Resumed))
     }
 
     /// Whether the TLS handshake has not yet completed.

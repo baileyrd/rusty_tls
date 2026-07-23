@@ -11,9 +11,11 @@
 //! `Read + Write` stream, plus [`TrustPolicy`], the one place trust
 //! decisions are made. `new_with_client_identity` presents a client
 //! certificate (mTLS) to a server that requests one; `new_with_alpn` offers
-//! ALPN protocols (read back via `negotiated_alpn_protocol`). Behind the
-//! `rusty-tokio` feature, [`AsyncTlsStream`] is the same thing over
-//! `rusty_tokio`'s `AsyncRead + AsyncWrite`.
+//! ALPN protocols (read back via `negotiated_alpn_protocol`). [`TlsConnector`]
+//! builds a config once for reuse across many connections, the way real
+//! session resumption (`resumed_session`) needs. Behind the `rusty-tokio`
+//! feature, [`AsyncTlsStream`] is the same thing over `rusty_tokio`'s
+//! `AsyncRead + AsyncWrite`.
 //!
 //! Server side: [`TlsAcceptor`] (a certificate + private key, built once)
 //! and [`TlsServerStream`], the sync per-connection wrapper it produces.
@@ -43,6 +45,7 @@ mod async_client;
 #[cfg(feature = "rusty-tokio")]
 mod async_server;
 mod client;
+mod connector;
 mod danger;
 mod error;
 mod server;
@@ -53,6 +56,7 @@ pub use async_client::AsyncTlsStream;
 #[cfg(feature = "rusty-tokio")]
 pub use async_server::AsyncTlsServerStream;
 pub use client::TlsStream;
+pub use connector::TlsConnector;
 pub use error::Error;
 pub use server::{TlsAcceptor, TlsServerStream};
 pub use trust::TrustPolicy;

@@ -9,7 +9,7 @@ rustls type from callers: a consumer names only `TlsStream`/`TlsAcceptor`/
 the seam is rustls; the seam is what makes that replaceable later without
 touching consumer code.
 
-**Not goals (yet):** session resumption, revocation, or any hand-rolled
+**Not goals (yet):** revocation, kTLS offload, or any hand-rolled
 cryptography — see [Non-goals](#non-goals).
 
 ## Boundaries
@@ -17,9 +17,10 @@ cryptography — see [Non-goals](#non-goals).
 | Port | Adapter(s) | Notes |
 | ---- | ---------- | ----- |
 | Trust decision (`TrustPolicy` → `rustls::ClientConfig`) | `trust::build_client_config`/`build_client_config_with_identity`/`build_client_config_with_alpn` | The one place a `rustls::RootCertStore`/verifier gets constructed, via a shared `client_config_builder` (the server-verification decision, independent of client identity or ALPN). `System` reads OS anchors via `rustls-native-certs`; `PinnedAnchors` takes caller-supplied DER; `DangerNoVerification` installs `danger::NoServerCertVerification`. Shared by both adapters below — this is the real reusable "core." |
-| Sync transport (`TlsStream<S: Read + Write>`) | `client::TlsStream` (wraps `rustls::Stream` internally) | Never dials — accepts an already-connected `S`, so protocols that run a plaintext exchange before upgrading (RDP's X.224 negotiation) can hand over a used stream. `complete_handshake()`/`peer_certificate_der()` expose just enough handshake-derived state (raw DER, never a parsed rustls type) for a consumer like RDP's CredSSP exchange that needs the peer's certificate for its own channel binding. `new_with_client_identity()` presents a client certificate (mTLS) to a server that requests one; `new_with_alpn()`/`negotiated_alpn_protocol()` offer and read back ALPN protocols. |
+| Sync transport (`TlsStream<S: Read + Write>`) | `client::TlsStream` (wraps `rustls::Stream` internally) | Never dials — accepts an already-connected `S`, so protocols that run a plaintext exchange before upgrading (RDP's X.224 negotiation) can hand over a used stream. `complete_handshake()`/`peer_certificate_der()` expose just enough handshake-derived state (raw DER, never a parsed rustls type) for a consumer like RDP's CredSSP exchange that needs the peer's certificate for its own channel binding. `new_with_client_identity()` presents a client certificate (mTLS) to a server that requests one; `new_with_alpn()`/`negotiated_alpn_protocol()` offer and read back ALPN protocols; `resumed_session()` reports whether a connection resumed a previous one (only meaningful via `TlsConnector`, below). |
 | Async transport (`AsyncTlsStream<S: AsyncRead + AsyncWrite>`, feature `rusty-tokio`) | `async_client::AsyncTlsStream` | Drives the same sans-IO `rustls::ClientConnection` (`wants_read`/`wants_write`/`read_tls`/`write_tls`/`process_new_packets`) over `rusty_tokio`'s poll-based `AsyncRead`/`AsyncWrite`, via a small internal `PollAdapter` that turns `Poll::Pending` into `io::ErrorKind::WouldBlock` for rustls' synchronous `read_tls`/`write_tls` to see. `rusty_tokio` itself stays TLS-free; the dependency is optional and off by default. |
-| Server config (`TlsAcceptor`) | `server::TlsAcceptor` | The server-side mirror of the trust-decision row: builds a `rustls::ServerConfig` from a certificate chain + private key (DER, any of PKCS#8/PKCS#1/SEC1, auto-detected). Built once, cheap to reuse (`Arc`-backed) across every accepted connection. `new_with_client_auth()` additionally requires and verifies a client certificate (mTLS) against caller-supplied client-CA roots, via `rustls::server::WebPkiClientVerifier`. `new_with_alpn()` offers ALPN protocols, read back per connection via `negotiated_alpn_protocol()` on either server stream type. |
+| Reusable client config (`TlsConnector`) | `connector::TlsConnector` | Builds a `ClientConfig` once (via `trust::build_client_config`) and reuses it (`Arc`-backed) across every `connect()`/`connect_async()` call — the client-side mirror of `TlsAcceptor`, and the only way session resumption actually triggers: `TlsStream::new`/`AsyncTlsStream::new` each build a fresh config (and thus a fresh, empty resumption cache) per call, so rustls' own default resumption support never gets reused state to resume *from* through them alone. |
+| Server config (`TlsAcceptor`) | `server::TlsAcceptor` | The server-side mirror of the trust-decision row: builds a `rustls::ServerConfig` from a certificate chain + private key (DER, any of PKCS#8/PKCS#1/SEC1, auto-detected). Built once, cheap to reuse (`Arc`-backed) across every accepted connection — which is also what makes session resumption work on this side already: the one thing `finish_config` adds is a real `rustls::crypto::ring::Ticketer` (rustls' own `ServerConfig` default is `NeverProducesTickets`, silently disabling TLS 1.3 resumption specifically). `new_with_client_auth()` additionally requires and verifies a client certificate (mTLS) against caller-supplied client-CA roots, via `rustls::server::WebPkiClientVerifier`. `new_with_alpn()` offers ALPN protocols, read back per connection via `negotiated_alpn_protocol()` on either server stream type. |
 | Sync server transport (`TlsServerStream<S: Read + Write>`) | `server::TlsServerStream` (wraps `rustls::Stream` internally) | The server counterpart to `TlsStream` — built via `TlsAcceptor::accept`, same lazy-handshake/`complete_handshake()` shape. |
 | Async server transport (`AsyncTlsServerStream<S: AsyncRead + AsyncWrite>`, feature `rusty-tokio`) | `async_server::AsyncTlsServerStream` | The server counterpart to `AsyncTlsStream` — built via `TlsAcceptor::accept_async`, driving the same sans-IO `ServerConnection` over `rusty_tokio`'s poll-based I/O via its own `PollAdapter` (not shared with the client adapter's, matching this crate's existing client/server duplication convention below). Built without a confirmed live consumer (see Non-goals' consumer-gating discipline; this one was an explicit, requested exception). |
 
@@ -35,6 +36,8 @@ one artifact to ship and no team/language boundary to split across:
 - `client` — `TlsStream`, the sync client adapter.
 - `async_client` (feature `rusty-tokio`) — `AsyncTlsStream`, the async
   client adapter.
+- `connector` — `TlsConnector`, the reusable-config client-side mirror of
+  `TlsAcceptor` (needed for session resumption to actually trigger).
 - `server` — `TlsAcceptor` (config) and `TlsServerStream` (the sync server
   adapter it produces).
 
@@ -80,9 +83,9 @@ drives the handshake exactly as step 3 describes.
 See [docs/adr/](./docs/adr/) for the record of individual decisions and their tradeoffs.
 
 ## Non-goals
-- **Session resumption, revocation, kTLS offload.** Out of scope for the
-  MVP; add only if a named consumer needs one, the same consumer-gate
-  discipline rustils applies to its own primitives.
+- **Revocation, kTLS offload.** Out of scope for the MVP; add only if a
+  named consumer needs one, the same consumer-gate discipline rustils
+  applies to its own primitives.
 - **Any hand-rolled cryptography, ever, as the default.** rustls stays the
   engine. If a future differential-testing experiment wants to explore an
   alternative backend behind the same seam, that happens explicitly,

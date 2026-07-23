@@ -7,10 +7,11 @@
 
 use std::io::{self, Read, Write};
 use std::pin::Pin;
+use std::sync::Arc;
 use std::task::{ready, Context, Poll};
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
-use rustls::ClientConnection;
+use rustls::{ClientConfig, ClientConnection, HandshakeKind};
 use rusty_tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::error::Error;
@@ -37,6 +38,21 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsStream<S> {
     /// [`crate::TlsStream::new`].
     pub fn new(io: S, server_name: &str, policy: &TrustPolicy) -> Result<Self, Error> {
         let config = build_client_config(policy)?;
+        let name = ServerName::try_from(server_name.to_string())
+            .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
+        let conn = ClientConnection::new(config, name)?;
+        Ok(Self { conn, io })
+    }
+
+    /// Wrap `io` in a TLS client connection using an already-built
+    /// `config` — what [`TlsConnector`](crate::TlsConnector) uses so
+    /// repeated connections share the same session-resumption cache,
+    /// rather than each getting a fresh, empty one.
+    pub(crate) fn from_config(
+        config: Arc<ClientConfig>,
+        io: S,
+        server_name: &str,
+    ) -> Result<Self, Error> {
         let name = ServerName::try_from(server_name.to_string())
             .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
         let conn = ClientConnection::new(config, name)?;
@@ -90,6 +106,14 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsStream<S> {
     /// docs for when this is (and isn't) populated.
     pub fn negotiated_alpn_protocol(&self) -> Option<&[u8]> {
         self.conn.alpn_protocol()
+    }
+
+    /// Whether this connection resumed a previous TLS session rather than
+    /// performing a full handshake. See
+    /// [`TlsStream::resumed_session`](crate::TlsStream::resumed_session)'s
+    /// docs for when this is (and isn't) meaningful.
+    pub fn resumed_session(&self) -> bool {
+        matches!(self.conn.handshake_kind(), Some(HandshakeKind::Resumed))
     }
 
     /// Whether the TLS handshake has not yet completed.

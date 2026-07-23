@@ -1,9 +1,6 @@
 //! Server-side TLS: accept connections presenting a certificate and
 //! private key, optionally requiring and verifying a client certificate
 //! (mTLS), or offering ALPN protocols, in turn.
-//!
-//! No session-resumption tuning yet. Add that behind its own opt-in
-//! surface if/when a named consumer needs one.
 
 use std::io::{self, Read, Write};
 use std::sync::Arc;
@@ -13,6 +10,19 @@ use rustls::server::WebPkiClientVerifier;
 use rustls::{RootCertStore, ServerConfig, ServerConnection};
 
 use crate::error::Error;
+
+/// Finishes a `ServerConfig` and wraps it for reuse across every accepted
+/// connection. Sets a real session-ticket producer — `rustls::ServerConfig`
+/// otherwise defaults to `NeverProducesTickets`, which silently disables
+/// TLS 1.3 session resumption even though `TlsAcceptor` already builds its
+/// config once and reuses it (`Arc`-backed) across connections, exactly the
+/// pattern resumption needs. Stateful (session-ID/ticket-lookup) resumption
+/// already works via `ServerConfig`'s own default `session_storage`; this
+/// is the other half, for TLS 1.3's ticket-based resumption specifically.
+fn finish_config(mut config: ServerConfig) -> Result<Arc<ServerConfig>, Error> {
+    config.ticketer = rustls::crypto::ring::Ticketer::new()?;
+    Ok(Arc::new(config))
+}
 
 /// The TLS configuration a server accepts connections with: a certificate
 /// chain and its private key. Build once and reuse — accepting a
@@ -38,7 +48,7 @@ impl TlsAcceptor {
             .with_no_client_auth()
             .with_single_cert(cert_chain, key)?;
         Ok(Self {
-            config: Arc::new(config),
+            config: finish_config(config)?,
         })
     }
 
@@ -74,7 +84,7 @@ impl TlsAcceptor {
             .with_client_cert_verifier(client_verifier)
             .with_single_cert(cert_chain, key)?;
         Ok(Self {
-            config: Arc::new(config),
+            config: finish_config(config)?,
         })
     }
 
@@ -98,7 +108,7 @@ impl TlsAcceptor {
             .with_single_cert(cert_chain, key)?;
         config.alpn_protocols = alpn_protocols;
         Ok(Self {
-            config: Arc::new(config),
+            config: finish_config(config)?,
         })
     }
 
