@@ -14,7 +14,10 @@ use rustls::ClientConnection;
 use rusty_tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::error::Error;
-use crate::trust::{build_client_config, build_client_config_with_identity, TrustPolicy};
+use crate::trust::{
+    build_client_config, build_client_config_with_alpn, build_client_config_with_identity,
+    TrustPolicy,
+};
 
 /// A TLS client connection layered over any `rusty_tokio`
 /// `AsyncRead + AsyncWrite` stream (typically [`rusty_tokio::io::TcpStream`]).
@@ -63,6 +66,30 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsStream<S> {
             .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
         let conn = ClientConnection::new(config, name)?;
         Ok(Self { conn, io })
+    }
+
+    /// Like [`AsyncTlsStream::new`], but offers `alpn_protocols` (each
+    /// entry a wire-format protocol ID, e.g. `b"h2"`) during the handshake
+    /// — the async counterpart to
+    /// [`TlsStream::new_with_alpn`](crate::TlsStream::new_with_alpn).
+    pub fn new_with_alpn(
+        io: S,
+        server_name: &str,
+        policy: &TrustPolicy,
+        alpn_protocols: Vec<Vec<u8>>,
+    ) -> Result<Self, Error> {
+        let config = build_client_config_with_alpn(policy, alpn_protocols)?;
+        let name = ServerName::try_from(server_name.to_string())
+            .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
+        let conn = ClientConnection::new(config, name)?;
+        Ok(Self { conn, io })
+    }
+
+    /// The protocol negotiated via ALPN, if any. See
+    /// [`TlsStream::negotiated_alpn_protocol`](crate::TlsStream::negotiated_alpn_protocol)'s
+    /// docs for when this is (and isn't) populated.
+    pub fn negotiated_alpn_protocol(&self) -> Option<&[u8]> {
+        self.conn.alpn_protocol()
     }
 
     /// Whether the TLS handshake has not yet completed.

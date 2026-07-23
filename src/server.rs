@@ -1,9 +1,9 @@
 //! Server-side TLS: accept connections presenting a certificate and
 //! private key, optionally requiring and verifying a client certificate
-//! (mTLS) in turn.
+//! (mTLS), or offering ALPN protocols, in turn.
 //!
-//! No ALPN, no session-resumption tuning yet. Add those behind their own
-//! opt-in surface if/when a named consumer needs one.
+//! No session-resumption tuning yet. Add that behind its own opt-in
+//! surface if/when a named consumer needs one.
 
 use std::io::{self, Read, Write};
 use std::sync::Arc;
@@ -78,6 +78,30 @@ impl TlsAcceptor {
         })
     }
 
+    /// Like [`TlsAcceptor::new`], but offers `alpn_protocols` (each entry a
+    /// wire-format protocol ID, e.g. `b"h2"`) during the handshake. See
+    /// [`TlsServerStream::negotiated_alpn_protocol`] to read back what was
+    /// actually negotiated with a given connection.
+    pub fn new_with_alpn(
+        cert_chain_der: Vec<Vec<u8>>,
+        private_key_der: Vec<u8>,
+        alpn_protocols: Vec<Vec<u8>>,
+    ) -> Result<Self, Error> {
+        let cert_chain: Vec<CertificateDer<'static>> = cert_chain_der
+            .into_iter()
+            .map(CertificateDer::from)
+            .collect();
+        let key = PrivateKeyDer::try_from(private_key_der)
+            .map_err(|reason| Error::InvalidPrivateKey(reason.to_string()))?;
+        let mut config = ServerConfig::builder()
+            .with_no_client_auth()
+            .with_single_cert(cert_chain, key)?;
+        config.alpn_protocols = alpn_protocols;
+        Ok(Self {
+            config: Arc::new(config),
+        })
+    }
+
     /// Wrap `sock` (already accepted) in a TLS server connection.
     ///
     /// Performs no I/O itself — the handshake runs lazily, driven by the
@@ -145,6 +169,13 @@ impl<S: Read + Write> TlsServerStream<S> {
             self.conn.complete_io(&mut self.sock)?;
         }
         Ok(())
+    }
+
+    /// The protocol negotiated via ALPN, if any. See
+    /// [`TlsStream::negotiated_alpn_protocol`](crate::TlsStream::negotiated_alpn_protocol)'s
+    /// docs for when this is (and isn't) populated.
+    pub fn negotiated_alpn_protocol(&self) -> Option<&[u8]> {
+        self.conn.alpn_protocol()
     }
 }
 

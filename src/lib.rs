@@ -10,7 +10,8 @@
 //! Client side: [`TlsStream`], a sync adapter layered over any
 //! `Read + Write` stream, plus [`TrustPolicy`], the one place trust
 //! decisions are made. `new_with_client_identity` presents a client
-//! certificate (mTLS) to a server that requests one. Behind the
+//! certificate (mTLS) to a server that requests one; `new_with_alpn` offers
+//! ALPN protocols (read back via `negotiated_alpn_protocol`). Behind the
 //! `rusty-tokio` feature, [`AsyncTlsStream`] is the same thing over
 //! `rusty_tokio`'s `AsyncRead + AsyncWrite`.
 //!
@@ -18,11 +19,11 @@
 //! and [`TlsServerStream`], the sync per-connection wrapper it produces.
 //! `new_with_client_auth` additionally requires and verifies a client
 //! certificate against caller-supplied client-CA roots, pairing with the
-//! client side's `new_with_client_identity` for full mTLS. Behind the
-//! `rusty-tokio` feature, [`AsyncTlsServerStream`] is the async
-//! counterpart, produced by [`TlsAcceptor::accept_async`] — see the
-//! crate's `ARCHITECTURE.md` for the full roadmap and what's deliberately
-//! not built.
+//! client side's `new_with_client_identity` for full mTLS; `new_with_alpn`
+//! mirrors the client side's ALPN support. Behind the `rusty-tokio`
+//! feature, [`AsyncTlsServerStream`] is the async counterpart, produced by
+//! [`TlsAcceptor::accept_async`] — see the crate's `ARCHITECTURE.md` for
+//! the full roadmap and what's deliberately not built.
 //!
 //! # Example
 //!
