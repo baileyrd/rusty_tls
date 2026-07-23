@@ -9,13 +9,15 @@
 //!
 //! Client side: [`TlsStream`], a sync adapter layered over any
 //! `Read + Write` stream, plus [`TrustPolicy`], the one place trust
-//! decisions are made. `new_with_client_identity` presents a client
-//! certificate (mTLS) to a server that requests one; `new_with_alpn` offers
-//! ALPN protocols (read back via `negotiated_alpn_protocol`). [`TlsConnector`]
-//! builds a config once for reuse across many connections, the way real
-//! session resumption (`resumed_session`) needs. Behind the `rusty-tokio`
-//! feature, [`AsyncTlsStream`] is the same thing over `rusty_tokio`'s
-//! `AsyncRead + AsyncWrite`.
+//! decisions are made — including
+//! [`PinnedAnchorsWithRevocation`](TrustPolicy::PinnedAnchorsWithRevocation)
+//! for CRL-based revocation checking. `new_with_client_identity` presents a
+//! client certificate (mTLS) to a server that requests one; `new_with_alpn`
+//! offers ALPN protocols (read back via `negotiated_alpn_protocol`).
+//! [`TlsConnector`] builds a config once for reuse across many connections,
+//! the way real session resumption (`resumed_session`) needs. Behind the
+//! `rusty-tokio` feature, [`AsyncTlsStream`] is the same thing over
+//! `rusty_tokio`'s `AsyncRead + AsyncWrite`.
 //!
 //! Server side: [`TlsAcceptor`] (a certificate + private key, built once)
 //! and [`TlsServerStream`], the sync per-connection wrapper it produces.

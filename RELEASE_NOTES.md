@@ -22,6 +22,33 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Add CRL-based revocation checking to `TrustPolicy`
+**2026-07-23**
+
+- **Added:** `TrustPolicy::PinnedAnchorsWithRevocation { roots, crls }` —
+  like `PinnedAnchors`, but additionally rejects any server certificate
+  appearing on one of the caller-supplied, DER-encoded CRLs. Wired via
+  `rustls::client::WebPkiServerVerifier::builder(..).with_crls(..)` in
+  place of the plain `with_root_certificates` path the other
+  verifying variants use.
+- **Added:** `Error::InvalidRevocationConfig`, for when the roots/CRLs
+  can't be turned into a verifier.
+- **Scope:** CRL only, deliberately — OCSP remains out of scope (now
+  explicit in `ARCHITECTURE.md`'s Non-goals) since it would mean this
+  crate either making network calls for the first time or accepting
+  caller-supplied staples, a separate decision from "check a
+  caller-supplied CRL."
+- **Context:** closes the gap tracked against `ARCHITECTURE.md`'s
+  Non-goals list (parity-loop run), landing on top of the previous entry's
+  `#[non_exhaustive]` migration so this variant didn't need a second
+  breaking change.
+- **Tests:** 3 new hermetic tests against a plain rustls server — a
+  revoked certificate rejected, a live certificate from the same CA (and
+  checked against the same CRL) accepted, and empty roots failing at
+  config-build time the same way `PinnedAnchors` with zero certs does. All
+  tests passing; `cargo clippy --all-targets --all-features -- -D
+  warnings` and `cargo fmt --check` both clean.
+
 ## Make `TrustPolicy` `#[non_exhaustive]`
 **2026-07-23**
 

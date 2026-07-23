@@ -29,6 +29,11 @@ pub enum Error {
     /// a client-certificate verifier — most commonly because none were
     /// supplied, or none were valid DER.
     InvalidClientCaRoots(String),
+    /// The roots or CRLs handed to
+    /// [`crate::TrustPolicy::PinnedAnchorsWithRevocation`] couldn't be
+    /// turned into a certificate verifier — most commonly an unparseable
+    /// CRL.
+    InvalidRevocationConfig(String),
 }
 
 impl fmt::Display for Error {
@@ -44,6 +49,9 @@ impl fmt::Display for Error {
             Error::InvalidClientCaRoots(reason) => {
                 write!(f, "invalid client CA roots: {reason}")
             }
+            Error::InvalidRevocationConfig(reason) => {
+                write!(f, "invalid revocation config: {reason}")
+            }
         }
     }
 }
@@ -56,7 +64,8 @@ impl std::error::Error for Error {
             Error::InvalidServerName(_)
             | Error::NoTrustAnchors
             | Error::InvalidPrivateKey(_)
-            | Error::InvalidClientCaRoots(_) => None,
+            | Error::InvalidClientCaRoots(_)
+            | Error::InvalidRevocationConfig(_) => None,
         }
     }
 }
