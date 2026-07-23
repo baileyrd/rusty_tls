@@ -22,6 +22,41 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Enable TLS session resumption across connections
+**2026-07-23**
+
+- **Added:** `TlsConnector`, the client-side mirror of `TlsAcceptor` —
+  builds a `ClientConfig` once via a new `pub(crate)` `TlsStream`/
+  `AsyncTlsStream::from_config`, then reuses it (`Arc`-backed) across every
+  `connect()`/`connect_async()` call. `TlsStream::new`/`AsyncTlsStream::new`
+  build a fresh config (and thus a fresh, empty resumption cache) per call,
+  so rustls' own default resumption support (a real 256-entry session
+  cache, on by default) never had reused state to resume from through them
+  alone — `TlsConnector` is the opt-in path for a caller that reconnects to
+  the same host repeatedly.
+- **Added:** `resumed_session()` on `TlsStream`/`AsyncTlsStream`, reporting
+  whether a given connection resumed a previous session — the only way to
+  actually confirm this gap is closed, not just that a connection succeeds.
+- **Fixed:** `TlsAcceptor` silently disabled TLS 1.3 session resumption
+  specifically — `rustls::ServerConfig` defaults its `ticketer` to
+  `NeverProducesTickets`, so a server built via this crate never issued
+  session tickets even though `TlsAcceptor` already builds its config once
+  and reuses it across every accepted connection (exactly what resumption
+  needs). Fixed via a shared `finish_config` helper that installs a real
+  `rustls::crypto::ring::Ticketer` in all three `TlsAcceptor` constructors.
+  Stateful (session-ID) resumption already worked, since `ServerConfig`'s
+  default `session_storage` is a real in-memory cache — this was
+  specifically the TLS 1.3 ticket-issuance half.
+- **Context:** closes the gap tracked against `ARCHITECTURE.md`'s Non-goals
+  list (parity-loop run); session resumption dropped from Non-goals.
+- **Tests:** 3 new hermetic tests (2 sync + 1 async) that make two
+  *sequential* connections through a shared `TlsConnector`/`TlsAcceptor`
+  and confirm the second one actually resumes — plus a negative case
+  confirming two independent `TlsConnector`s (mirroring what two
+  independent `TlsStream::new` calls would do) never share a cache and so
+  never resume. All 32 tests passing; `cargo clippy --all-targets
+  --all-features -- -D warnings` and `cargo fmt --check` both clean.
+
 ## Add ALPN protocol negotiation to client and server adapters
 **2026-07-23**
 
