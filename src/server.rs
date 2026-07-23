@@ -51,6 +51,20 @@ impl TlsAcceptor {
         let conn = ServerConnection::new(self.config.clone())?;
         Ok(TlsServerStream { conn, sock })
     }
+
+    /// Wrap `io` (already accepted) in an async TLS server connection — the
+    /// async counterpart to [`TlsAcceptor::accept`]. Behind the
+    /// `rusty-tokio` feature, driving the same sans-IO `ServerConnection`
+    /// over `rusty_tokio`'s `AsyncRead`/`AsyncWrite` instead of blocking I/O,
+    /// the way [`AsyncTlsStream`](crate::AsyncTlsStream) does on the client
+    /// side.
+    #[cfg(feature = "rusty-tokio")]
+    pub fn accept_async<S: rusty_tokio::io::AsyncRead + rusty_tokio::io::AsyncWrite + Unpin>(
+        &self,
+        io: S,
+    ) -> Result<crate::async_server::AsyncTlsServerStream<S>, Error> {
+        crate::async_server::AsyncTlsServerStream::new(self.config.clone(), io)
+    }
 }
 
 /// A TLS server connection layered over any `Read + Write` stream — the

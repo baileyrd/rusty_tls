@@ -9,9 +9,9 @@ rustls type from callers: a consumer names only `TlsStream`/`TlsAcceptor`/
 the seam is rustls; the seam is what makes that replaceable later without
 touching consumer code.
 
-**Not goals (yet):** an async server adapter, client-certificate
-authentication (mTLS) on either side, ALPN/session resumption, revocation,
-or any hand-rolled cryptography — see [Non-goals](#non-goals).
+**Not goals (yet):** client-certificate authentication (mTLS) on either
+side, ALPN/session resumption, revocation, or any hand-rolled cryptography —
+see [Non-goals](#non-goals).
 
 ## Boundaries
 
@@ -21,7 +21,8 @@ or any hand-rolled cryptography — see [Non-goals](#non-goals).
 | Sync transport (`TlsStream<S: Read + Write>`) | `client::TlsStream` (wraps `rustls::Stream` internally) | Never dials — accepts an already-connected `S`, so protocols that run a plaintext exchange before upgrading (RDP's X.224 negotiation) can hand over a used stream. `complete_handshake()`/`peer_certificate_der()` expose just enough handshake-derived state (raw DER, never a parsed rustls type) for a consumer like RDP's CredSSP exchange that needs the peer's certificate for its own channel binding. |
 | Async transport (`AsyncTlsStream<S: AsyncRead + AsyncWrite>`, feature `rusty-tokio`) | `async_client::AsyncTlsStream` | Drives the same sans-IO `rustls::ClientConnection` (`wants_read`/`wants_write`/`read_tls`/`write_tls`/`process_new_packets`) over `rusty_tokio`'s poll-based `AsyncRead`/`AsyncWrite`, via a small internal `PollAdapter` that turns `Poll::Pending` into `io::ErrorKind::WouldBlock` for rustls' synchronous `read_tls`/`write_tls` to see. `rusty_tokio` itself stays TLS-free; the dependency is optional and off by default. |
 | Server config (`TlsAcceptor`) | `server::TlsAcceptor` | The server-side mirror of the trust-decision row: builds a `rustls::ServerConfig` from a certificate chain + private key (DER, any of PKCS#8/PKCS#1/SEC1, auto-detected), no client-certificate authentication. Built once, cheap to reuse (`Arc`-backed) across every accepted connection. |
-| Sync server transport (`TlsServerStream<S: Read + Write>`) | `server::TlsServerStream` (wraps `rustls::Stream` internally) | The server counterpart to `TlsStream` — built via `TlsAcceptor::accept`, same lazy-handshake/`complete_handshake()` shape. No async server adapter yet (see Non-goals). |
+| Sync server transport (`TlsServerStream<S: Read + Write>`) | `server::TlsServerStream` (wraps `rustls::Stream` internally) | The server counterpart to `TlsStream` — built via `TlsAcceptor::accept`, same lazy-handshake/`complete_handshake()` shape. |
+| Async server transport (`AsyncTlsServerStream<S: AsyncRead + AsyncWrite>`, feature `rusty-tokio`) | `async_server::AsyncTlsServerStream` | The server counterpart to `AsyncTlsStream` — built via `TlsAcceptor::accept_async`, driving the same sans-IO `ServerConnection` over `rusty_tokio`'s poll-based I/O via its own `PollAdapter` (not shared with the client adapter's, matching this crate's existing client/server duplication convention below). Built without a confirmed live consumer (see Non-goals' consumer-gating discipline; this one was an explicit, requested exception). |
 
 ## Structure
 Single crate, modular by concern rather than a workspace — there is exactly
@@ -80,11 +81,6 @@ drives the handshake exactly as step 3 describes.
 See [docs/adr/](./docs/adr/) for the record of individual decisions and their tradeoffs.
 
 ## Non-goals
-- **An async server adapter.** The sync `TlsServerStream` exists; nothing
-  yet drives the same sans-IO `ServerConnection` over `rusty_tokio`. Add
-  it if/when a named async server consumer shows up (rusty_llama's
-  optional server is the one flagged in this project's design record, but
-  its actual TLS shape hasn't been verified against source).
 - **ALPN, session resumption, client certificates (mTLS), revocation,
   kTLS offload.** Out of scope for the MVP, client or server side; add
   only if a named consumer needs one, the same consumer-gate discipline

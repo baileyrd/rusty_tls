@@ -14,9 +14,11 @@
 //!
 //! Server side: [`TlsAcceptor`] (a certificate + private key, built once)
 //! and [`TlsServerStream`], the sync per-connection wrapper it produces.
-//! No client-certificate authentication (matching the client side having no
-//! client-cert support), and no async server adapter yet — see the crate's
-//! `ARCHITECTURE.md` for the full roadmap and what's deliberately not built.
+//! Behind the `rusty-tokio` feature, [`AsyncTlsServerStream`] is the async
+//! counterpart, produced by [`TlsAcceptor::accept_async`]. No
+//! client-certificate authentication yet (matching the client side having no
+//! client-cert support) — see the crate's `ARCHITECTURE.md` for the full
+//! roadmap and what's deliberately not built.
 //!
 //! # Example
 //!
@@ -33,6 +35,8 @@
 
 #[cfg(feature = "rusty-tokio")]
 mod async_client;
+#[cfg(feature = "rusty-tokio")]
+mod async_server;
 mod client;
 mod danger;
 mod error;
@@ -41,6 +45,8 @@ mod trust;
 
 #[cfg(feature = "rusty-tokio")]
 pub use async_client::AsyncTlsStream;
+#[cfg(feature = "rusty-tokio")]
+pub use async_server::AsyncTlsServerStream;
 pub use client::TlsStream;
 pub use error::Error;
 pub use server::{TlsAcceptor, TlsServerStream};
