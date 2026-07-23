@@ -22,6 +22,30 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Add ALPN protocol negotiation to client and server adapters
+**2026-07-23**
+
+- **Added:** `new_with_alpn` constructors on `TlsStream`, `AsyncTlsStream`,
+  and `TlsAcceptor` (each accepting `alpn_protocols: Vec<Vec<u8>>`,
+  wire-format protocol IDs e.g. `b"h2"`), alongside the existing `new`
+  constructors (untouched, no ALPN offered). `negotiated_alpn_protocol()`
+  reads back what was actually negotiated, on all four stream types
+  (`TlsStream`, `AsyncTlsStream`, `TlsServerStream`,
+  `AsyncTlsServerStream`) — `None` until the handshake completes, and
+  `None` after it if either side offered nothing or nothing overlapped.
+  `AsyncTlsServerStream::accept_async` needed no changes: it already
+  reuses whatever `ServerConfig` the acceptor was built with.
+- **Added:** `trust::build_client_config_with_alpn`, following the same
+  shared-`client_config_builder` pattern the mTLS constructors use.
+- **Context:** closes a gap tracked against `ARCHITECTURE.md`'s Non-goals
+  list (parity-loop run); ALPN dropped from Non-goals entirely.
+- **Tests:** 4 new hermetic tests (3 sync + 1 async) using this crate's own
+  client and server types together — a shared protocol negotiated, no
+  protocol offered on either side (correctly negotiates none), and a
+  confirmed hard failure per RFC 7301 when the offered protocol sets don't
+  overlap. All 29 tests passing; `cargo clippy --all-targets --all-features
+  -- -D warnings` and `cargo fmt --check` both clean.
+
 ## Add client-certificate (mTLS) verification to `TlsAcceptor`
 **2026-07-23**
 

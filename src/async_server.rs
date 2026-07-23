@@ -62,6 +62,16 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsServerStream<S> {
         Ok(())
     }
 
+    /// The protocol negotiated via ALPN, if any. See
+    /// [`TlsStream::negotiated_alpn_protocol`](crate::TlsStream::negotiated_alpn_protocol)'s
+    /// docs for when this is (and isn't) populated. Set on the acceptor via
+    /// [`TlsAcceptor::new_with_alpn`](crate::TlsAcceptor::new_with_alpn) —
+    /// nothing extra to configure here, since `accept_async` reuses
+    /// whatever `ServerConfig` the acceptor was built with.
+    pub fn negotiated_alpn_protocol(&self) -> Option<&[u8]> {
+        self.conn.alpn_protocol()
+    }
+
     /// Drives I/O specifically until the handshake completes (or fails).
     /// Deliberately not built on [`poll_complete_io`](Self::poll_complete_io):
     /// that loop only stops once `wants_read()` goes false, which on an

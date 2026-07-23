@@ -4,7 +4,10 @@ use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::ClientConnection;
 
 use crate::error::Error;
-use crate::trust::{build_client_config, build_client_config_with_identity, TrustPolicy};
+use crate::trust::{
+    build_client_config, build_client_config_with_alpn, build_client_config_with_identity,
+    TrustPolicy,
+};
 
 /// A TLS client connection layered over any `Read + Write` stream.
 ///
@@ -67,6 +70,31 @@ impl<S: Read + Write> TlsStream<S> {
             .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
         let conn = ClientConnection::new(config, name)?;
         Ok(Self { conn, sock })
+    }
+
+    /// Like [`TlsStream::new`], but offers `alpn_protocols` (each entry a
+    /// wire-format protocol ID, e.g. `b"h2"`) during the handshake for
+    /// ALPN negotiation. See [`TlsStream::negotiated_alpn_protocol`] to
+    /// read back what the server actually picked.
+    pub fn new_with_alpn(
+        sock: S,
+        server_name: &str,
+        policy: &TrustPolicy,
+        alpn_protocols: Vec<Vec<u8>>,
+    ) -> Result<Self, Error> {
+        let config = build_client_config_with_alpn(policy, alpn_protocols)?;
+        let name = ServerName::try_from(server_name.to_string())
+            .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
+        let conn = ClientConnection::new(config, name)?;
+        Ok(Self { conn, sock })
+    }
+
+    /// The protocol negotiated via ALPN, if any — `None` until the
+    /// handshake completes (see [`TlsStream::complete_handshake`]), and
+    /// `None` after it if either side offered no protocols or the server
+    /// accepted none of the ones offered.
+    pub fn negotiated_alpn_protocol(&self) -> Option<&[u8]> {
+        self.conn.alpn_protocol()
     }
 
     /// Whether the TLS handshake has not yet completed.
