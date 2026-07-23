@@ -22,6 +22,30 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Add client-certificate (mTLS) verification to `TlsAcceptor`
+**2026-07-23**
+
+- **Added:** `TlsAcceptor::new_with_client_auth(cert_chain_der, private_key_der, client_ca_roots_der)`,
+  requiring and verifying a client certificate against caller-supplied
+  client-CA roots (via `rustls::server::WebPkiClientVerifier`), alongside
+  the existing `new` (which stays on the no-client-auth path). Pairs with
+  the client side's `new_with_client_identity` (previous entry) for full
+  mTLS — this closes the loop, so mTLS is now round-trippable through this
+  crate alone rather than needing a raw rustls server as one half.
+- **Added:** `Error::InvalidClientCaRoots`, for when the supplied roots
+  can't be turned into a client-certificate verifier (most commonly none
+  supplied, or none valid).
+- **Context:** closes the server-side half of the gap tracked against
+  `ARCHITECTURE.md`'s Non-goals list (parity-loop run); `ARCHITECTURE.md`
+  and `lib.rs` updated to drop mTLS from Non-goals entirely now that both
+  halves exist.
+- **Tests:** 4 new hermetic tests using only this crate's own client and
+  server types together — a trusted client cert accepted, an untrusted-CA
+  client cert rejected, no-client-cert rejected, and empty client-CA roots
+  rejected outright at `new_with_client_auth` time. All 25 tests passing;
+  `cargo clippy --all-targets --all-features -- -D warnings` and `cargo
+  fmt --check` both clean.
+
 ## Add client-certificate (mTLS) presentation to `TlsStream`/`AsyncTlsStream`
 **2026-07-23**
 
