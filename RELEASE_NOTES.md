@@ -22,6 +22,32 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Make `TrustPolicy` `#[non_exhaustive]`
+**2026-07-23**
+
+- **Changed:** `TrustPolicy` is now `#[non_exhaustive]`.
+- **Context:** a prerequisite for adding CRL/OCSP revocation support
+  (tracked in #13) without a second breaking change — this crate's own
+  usual pure-addition discipline doesn't stretch to "add an enum variant,"
+  which is itself breaking for any downstream exhaustive `match`. Taking
+  that cost once, deliberately, up front, per explicit decision on how to
+  sequence #13's work.
+
+### Upgrade notes
+
+**Breaking change.** Any code that exhaustively `match`es on `TrustPolicy`
+without a wildcard arm (`_ => ...`) will no longer compile against this
+version. Known affected consumers: `rusty_request` and `rusty_rdp`, both
+already migrated onto this crate — each needs a wildcard arm added to any
+`TrustPolicy` match before picking up this version. No behavior changes
+otherwise; existing variants (`System`, `PinnedAnchors`,
+`DangerNoVerification`) are unchanged.
+
+- **Tests:** no test changes needed — this repo's own use of `TrustPolicy`
+  only ever constructs variants, never exhaustively matches on it. All 32
+  tests still passing; `cargo clippy --all-targets --all-features -- -D
+  warnings` and `cargo fmt --check` both clean.
+
 ## Enable TLS session resumption across connections
 **2026-07-23**
 
