@@ -11,6 +11,12 @@ use crate::error::Error;
 /// server it connects to. Verify-by-default: [`TrustPolicy::System`] is the
 /// only variant [`Default`] produces, and the unsafe variant is named so it
 /// reads as dangerous at every call site.
+///
+/// `#[non_exhaustive]`: new variants get added as this crate grows (e.g.
+/// revocation-checking support) without that being a breaking change for
+/// callers every time — match with a wildcard arm (`_ => ...`) rather than
+/// exhaustively.
+#[non_exhaustive]
 #[derive(Debug, Clone, Default)]
 pub enum TrustPolicy {
     /// Verify against the operating system's trust anchors, loaded via
