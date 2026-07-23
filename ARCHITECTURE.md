@@ -9,16 +9,17 @@ rustls type from callers: a consumer names only `TlsStream`/`TlsAcceptor`/
 the seam is rustls; the seam is what makes that replaceable later without
 touching consumer code.
 
-**Not goals (yet):** client-certificate authentication (mTLS) on either
-side, ALPN/session resumption, revocation, or any hand-rolled cryptography —
-see [Non-goals](#non-goals).
+**Not goals (yet):** client-certificate *verification* on the server side
+(the client side can present one — see [Boundaries](#boundaries)), ALPN,
+session resumption, revocation, or any hand-rolled cryptography — see
+[Non-goals](#non-goals).
 
 ## Boundaries
 
 | Port | Adapter(s) | Notes |
 | ---- | ---------- | ----- |
-| Trust decision (`TrustPolicy` → `rustls::ClientConfig`) | `trust::build_client_config` | The one place a `rustls::RootCertStore`/verifier gets constructed. `System` reads OS anchors via `rustls-native-certs`; `PinnedAnchors` takes caller-supplied DER; `DangerNoVerification` installs `danger::NoServerCertVerification`. Shared by both adapters below — this is the real reusable "core." |
-| Sync transport (`TlsStream<S: Read + Write>`) | `client::TlsStream` (wraps `rustls::Stream` internally) | Never dials — accepts an already-connected `S`, so protocols that run a plaintext exchange before upgrading (RDP's X.224 negotiation) can hand over a used stream. `complete_handshake()`/`peer_certificate_der()` expose just enough handshake-derived state (raw DER, never a parsed rustls type) for a consumer like RDP's CredSSP exchange that needs the peer's certificate for its own channel binding. |
+| Trust decision (`TrustPolicy` → `rustls::ClientConfig`) | `trust::build_client_config`/`build_client_config_with_identity` | The one place a `rustls::RootCertStore`/verifier gets constructed, via a shared `client_config_builder` (the server-verification decision, independent of client identity). `System` reads OS anchors via `rustls-native-certs`; `PinnedAnchors` takes caller-supplied DER; `DangerNoVerification` installs `danger::NoServerCertVerification`. Shared by both adapters below — this is the real reusable "core." |
+| Sync transport (`TlsStream<S: Read + Write>`) | `client::TlsStream` (wraps `rustls::Stream` internally) | Never dials — accepts an already-connected `S`, so protocols that run a plaintext exchange before upgrading (RDP's X.224 negotiation) can hand over a used stream. `complete_handshake()`/`peer_certificate_der()` expose just enough handshake-derived state (raw DER, never a parsed rustls type) for a consumer like RDP's CredSSP exchange that needs the peer's certificate for its own channel binding. `new_with_client_identity()` presents a client certificate (mTLS) to a server that requests one — the server-side verification half of mTLS is still a Non-goal. |
 | Async transport (`AsyncTlsStream<S: AsyncRead + AsyncWrite>`, feature `rusty-tokio`) | `async_client::AsyncTlsStream` | Drives the same sans-IO `rustls::ClientConnection` (`wants_read`/`wants_write`/`read_tls`/`write_tls`/`process_new_packets`) over `rusty_tokio`'s poll-based `AsyncRead`/`AsyncWrite`, via a small internal `PollAdapter` that turns `Poll::Pending` into `io::ErrorKind::WouldBlock` for rustls' synchronous `read_tls`/`write_tls` to see. `rusty_tokio` itself stays TLS-free; the dependency is optional and off by default. |
 | Server config (`TlsAcceptor`) | `server::TlsAcceptor` | The server-side mirror of the trust-decision row: builds a `rustls::ServerConfig` from a certificate chain + private key (DER, any of PKCS#8/PKCS#1/SEC1, auto-detected), no client-certificate authentication. Built once, cheap to reuse (`Arc`-backed) across every accepted connection. |
 | Sync server transport (`TlsServerStream<S: Read + Write>`) | `server::TlsServerStream` (wraps `rustls::Stream` internally) | The server counterpart to `TlsStream` — built via `TlsAcceptor::accept`, same lazy-handshake/`complete_handshake()` shape. |
@@ -81,10 +82,13 @@ drives the handshake exactly as step 3 describes.
 See [docs/adr/](./docs/adr/) for the record of individual decisions and their tradeoffs.
 
 ## Non-goals
-- **ALPN, session resumption, client certificates (mTLS), revocation,
-  kTLS offload.** Out of scope for the MVP, client or server side; add
-  only if a named consumer needs one, the same consumer-gate discipline
-  rustils applies to its own primitives.
+- **ALPN, session resumption, client-certificate verification (server
+  side), revocation, kTLS offload.** Out of scope for the MVP; add only if
+  a named consumer needs one, the same consumer-gate discipline rustils
+  applies to its own primitives. (The client side can already *present* a
+  client certificate — see [Boundaries](#boundaries) — but no server-side
+  verification exists yet, so mTLS isn't fully round-trippable through
+  this crate alone.)
 - **Any hand-rolled cryptography, ever, as the default.** rustls stays the
   engine. If a future differential-testing experiment wants to explore an
   alternative backend behind the same seam, that happens explicitly,

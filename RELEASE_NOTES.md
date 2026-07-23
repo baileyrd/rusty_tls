@@ -22,6 +22,28 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Add client-certificate (mTLS) presentation to `TlsStream`/`AsyncTlsStream`
+**2026-07-23**
+
+- **Added:** `TlsStream::new_with_client_identity`/`AsyncTlsStream::new_with_client_identity`,
+  presenting a client certificate + private key to a server that requests
+  and verifies one (mTLS), alongside the existing `new` constructors (which
+  stay on the plain no-client-auth path).
+- **Refactored:** `trust::build_client_config` split into a shared
+  `client_config_builder` (the server-verification decision, per
+  `TrustPolicy`) plus two thin callers — one ending in
+  `with_no_client_auth()`, the new one ending in `with_client_auth_cert(..)`
+  — so the trust-decision logic isn't duplicated between the two paths.
+- **Context:** closes a gap tracked against `ARCHITECTURE.md`'s Non-goals
+  list (parity-loop run); covers the client-presents-a-certificate half
+  only — server-side verification is tracked separately (issue #10).
+- **Tests:** 3 new hermetic tests (sync + async) against a plain rustls
+  server configured to require client auth (this crate's own
+  `TlsAcceptor` doesn't verify client certs yet), covering both successful
+  presentation and rejection when none is presented. All 21 tests passing;
+  `cargo clippy --all-targets --all-features -- -D warnings` and `cargo
+  fmt --check` both clean.
+
 ## Add `AsyncTlsServerStream`: async server-side TLS adapter (feature `rusty-tokio`)
 **2026-07-23**
 
