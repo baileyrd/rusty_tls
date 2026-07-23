@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use rustls::client::WantsClientCert;
-use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::client::{WantsClientCert, WebPkiServerVerifier};
+use rustls::pki_types::{CertificateDer, CertificateRevocationListDer, PrivateKeyDer};
 use rustls::{ClientConfig, ConfigBuilder, RootCertStore};
 
 use crate::danger::NoServerCertVerification;
@@ -58,6 +58,22 @@ pub enum TrustPolicy {
     /// default, and never silently: every call site naming this variant is
     /// declaring, in the type system, that it isn't verifying its peer.
     DangerNoVerification,
+    /// Like [`TrustPolicy::PinnedAnchors`], but additionally reject any
+    /// server certificate appearing on one of `crls` (DER-encoded
+    /// Certificate Revocation Lists) — CRL-based revocation checking.
+    ///
+    /// OCSP is deliberately not covered by this variant: it would mean
+    /// either this crate making network calls for the first time (to fetch
+    /// responses itself) or a separate caller-supplied-staple design —
+    /// either way a decision distinct from "check a caller-supplied CRL,"
+    /// not bundled in here.
+    PinnedAnchorsWithRevocation {
+        /// The trusted root certificates, DER-encoded — same contract as
+        /// [`TrustPolicy::PinnedAnchors`].
+        roots: Vec<CertificateDer<'static>>,
+        /// DER-encoded CRLs to check presented certificates against.
+        crls: Vec<CertificateRevocationListDer<'static>>,
+    },
 }
 
 /// The part of building a `ClientConfig` that's identical whether the
@@ -95,6 +111,20 @@ fn client_config_builder(
         TrustPolicy::DangerNoVerification => ClientConfig::builder()
             .dangerous()
             .with_custom_certificate_verifier(Arc::new(NoServerCertVerification::new())),
+        TrustPolicy::PinnedAnchorsWithRevocation { roots, crls } => {
+            let mut root_store = RootCertStore::empty();
+            for cert in roots {
+                root_store.add(cert.clone())?;
+            }
+            if root_store.is_empty() {
+                return Err(Error::NoTrustAnchors);
+            }
+            let verifier = WebPkiServerVerifier::builder(Arc::new(root_store))
+                .with_crls(crls.clone())
+                .build()
+                .map_err(|e| Error::InvalidRevocationConfig(e.to_string()))?;
+            ClientConfig::builder().with_webpki_verifier(verifier)
+        }
     })
 }
 

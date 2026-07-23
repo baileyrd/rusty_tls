@@ -9,14 +9,15 @@ rustls type from callers: a consumer names only `TlsStream`/`TlsAcceptor`/
 the seam is rustls; the seam is what makes that replaceable later without
 touching consumer code.
 
-**Not goals (yet):** revocation, kTLS offload, or any hand-rolled
-cryptography — see [Non-goals](#non-goals).
+**Not goals (yet):** kTLS offload, or any hand-rolled cryptography — see
+[Non-goals](#non-goals). (CRL-based revocation checking is supported —
+OCSP is not, see [Boundaries](#boundaries).)
 
 ## Boundaries
 
 | Port | Adapter(s) | Notes |
 | ---- | ---------- | ----- |
-| Trust decision (`TrustPolicy` → `rustls::ClientConfig`) | `trust::build_client_config`/`build_client_config_with_identity`/`build_client_config_with_alpn` | The one place a `rustls::RootCertStore`/verifier gets constructed, via a shared `client_config_builder` (the server-verification decision, independent of client identity or ALPN). `System` reads OS anchors via `rustls-native-certs`; `PinnedAnchors` takes caller-supplied DER; `DangerNoVerification` installs `danger::NoServerCertVerification`. Shared by both adapters below — this is the real reusable "core." |
+| Trust decision (`TrustPolicy` → `rustls::ClientConfig`) | `trust::build_client_config`/`build_client_config_with_identity`/`build_client_config_with_alpn` | The one place a `rustls::RootCertStore`/verifier gets constructed, via a shared `client_config_builder` (the server-verification decision, independent of client identity or ALPN). `System` reads OS anchors via `rustls-native-certs`; `PinnedAnchors` takes caller-supplied DER; `DangerNoVerification` installs `danger::NoServerCertVerification`; `PinnedAnchorsWithRevocation` additionally checks presented certificates against caller-supplied CRLs, via `rustls::client::WebPkiServerVerifier::builder(..).with_crls(..)` in place of the plain `with_root_certificates` path the other verifying variants use. `TrustPolicy` is `#[non_exhaustive]` specifically so this and future variants don't repeat the breaking change adding this one was. Shared by both adapters below — this is the real reusable "core." |
 | Sync transport (`TlsStream<S: Read + Write>`) | `client::TlsStream` (wraps `rustls::Stream` internally) | Never dials — accepts an already-connected `S`, so protocols that run a plaintext exchange before upgrading (RDP's X.224 negotiation) can hand over a used stream. `complete_handshake()`/`peer_certificate_der()` expose just enough handshake-derived state (raw DER, never a parsed rustls type) for a consumer like RDP's CredSSP exchange that needs the peer's certificate for its own channel binding. `new_with_client_identity()` presents a client certificate (mTLS) to a server that requests one; `new_with_alpn()`/`negotiated_alpn_protocol()` offer and read back ALPN protocols; `resumed_session()` reports whether a connection resumed a previous one (only meaningful via `TlsConnector`, below). |
 | Async transport (`AsyncTlsStream<S: AsyncRead + AsyncWrite>`, feature `rusty-tokio`) | `async_client::AsyncTlsStream` | Drives the same sans-IO `rustls::ClientConnection` (`wants_read`/`wants_write`/`read_tls`/`write_tls`/`process_new_packets`) over `rusty_tokio`'s poll-based `AsyncRead`/`AsyncWrite`, via a small internal `PollAdapter` that turns `Poll::Pending` into `io::ErrorKind::WouldBlock` for rustls' synchronous `read_tls`/`write_tls` to see. `rusty_tokio` itself stays TLS-free; the dependency is optional and off by default. |
 | Reusable client config (`TlsConnector`) | `connector::TlsConnector` | Builds a `ClientConfig` once (via `trust::build_client_config`) and reuses it (`Arc`-backed) across every `connect()`/`connect_async()` call — the client-side mirror of `TlsAcceptor`, and the only way session resumption actually triggers: `TlsStream::new`/`AsyncTlsStream::new` each build a fresh config (and thus a fresh, empty resumption cache) per call, so rustls' own default resumption support never gets reused state to resume *from* through them alone. |
@@ -83,9 +84,14 @@ drives the handshake exactly as step 3 describes.
 See [docs/adr/](./docs/adr/) for the record of individual decisions and their tradeoffs.
 
 ## Non-goals
-- **Revocation, kTLS offload.** Out of scope for the MVP; add only if a
-  named consumer needs one, the same consumer-gate discipline rustils
-  applies to its own primitives.
+- **OCSP, kTLS offload.** Out of scope for the MVP; add only if a named
+  consumer needs one, the same consumer-gate discipline rustils applies to
+  its own primitives. (CRL-based revocation checking is *not* on this
+  list — see `TrustPolicy::PinnedAnchorsWithRevocation` in
+  [Boundaries](#boundaries). OCSP specifically would mean this crate
+  either making network calls for the first time or accepting
+  caller-supplied staples — a decision distinct from "check a
+  caller-supplied CRL," deliberately not bundled into that variant.)
 - **Any hand-rolled cryptography, ever, as the default.** rustls stays the
   engine. If a future differential-testing experiment wants to explore an
   alternative backend behind the same seam, that happens explicitly,
