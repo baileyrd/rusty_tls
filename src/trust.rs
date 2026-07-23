@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use rustls::pki_types::CertificateDer;
-use rustls::{ClientConfig, RootCertStore};
+use rustls::client::WantsClientCert;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer};
+use rustls::{ClientConfig, ConfigBuilder, RootCertStore};
 
 use crate::danger::NoServerCertVerification;
 use crate::error::Error;
@@ -53,8 +54,15 @@ pub enum TrustPolicy {
     DangerNoVerification,
 }
 
-pub(crate) fn build_client_config(policy: &TrustPolicy) -> Result<Arc<ClientConfig>, Error> {
-    let config = match policy {
+/// The part of building a `ClientConfig` that's identical whether the
+/// caller ends up presenting a client certificate or not: deciding how to
+/// verify the *server's* certificate, per `policy`. Shared by
+/// [`build_client_config`] and [`build_client_config_with_identity`] so the
+/// trust decision itself only lives in one place.
+fn client_config_builder(
+    policy: &TrustPolicy,
+) -> Result<ConfigBuilder<ClientConfig, WantsClientCert>, Error> {
+    Ok(match policy {
         TrustPolicy::System => {
             let loaded = rustls_native_certs::load_native_certs();
             let mut roots = RootCertStore::empty();
@@ -66,9 +74,7 @@ pub(crate) fn build_client_config(policy: &TrustPolicy) -> Result<Arc<ClientConf
             if roots.is_empty() {
                 return Err(Error::NoTrustAnchors);
             }
-            ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_no_client_auth()
+            ClientConfig::builder().with_root_certificates(roots)
         }
         TrustPolicy::PinnedAnchors(certs) => {
             let mut roots = RootCertStore::empty();
@@ -78,14 +84,27 @@ pub(crate) fn build_client_config(policy: &TrustPolicy) -> Result<Arc<ClientConf
             if roots.is_empty() {
                 return Err(Error::NoTrustAnchors);
             }
-            ClientConfig::builder()
-                .with_root_certificates(roots)
-                .with_no_client_auth()
+            ClientConfig::builder().with_root_certificates(roots)
         }
         TrustPolicy::DangerNoVerification => ClientConfig::builder()
             .dangerous()
-            .with_custom_certificate_verifier(Arc::new(NoServerCertVerification::new()))
-            .with_no_client_auth(),
-    };
+            .with_custom_certificate_verifier(Arc::new(NoServerCertVerification::new())),
+    })
+}
+
+pub(crate) fn build_client_config(policy: &TrustPolicy) -> Result<Arc<ClientConfig>, Error> {
+    let config = client_config_builder(policy)?.with_no_client_auth();
+    Ok(Arc::new(config))
+}
+
+/// Like [`build_client_config`], but presents `cert_chain`/`key` to the
+/// server as a client certificate (mTLS) — for a server that requests and
+/// verifies one, rather than the plain `with_no_client_auth()` path.
+pub(crate) fn build_client_config_with_identity(
+    policy: &TrustPolicy,
+    cert_chain: Vec<CertificateDer<'static>>,
+    key: PrivateKeyDer<'static>,
+) -> Result<Arc<ClientConfig>, Error> {
+    let config = client_config_builder(policy)?.with_client_auth_cert(cert_chain, key)?;
     Ok(Arc::new(config))
 }

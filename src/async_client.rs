@@ -9,12 +9,12 @@ use std::io::{self, Read, Write};
 use std::pin::Pin;
 use std::task::{ready, Context, Poll};
 
-use rustls::pki_types::ServerName;
+use rustls::pki_types::{CertificateDer, PrivateKeyDer, ServerName};
 use rustls::ClientConnection;
 use rusty_tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 
 use crate::error::Error;
-use crate::trust::{build_client_config, TrustPolicy};
+use crate::trust::{build_client_config, build_client_config_with_identity, TrustPolicy};
 
 /// A TLS client connection layered over any `rusty_tokio`
 /// `AsyncRead + AsyncWrite` stream (typically [`rusty_tokio::io::TcpStream`]).
@@ -34,6 +34,31 @@ impl<S: AsyncRead + AsyncWrite + Unpin> AsyncTlsStream<S> {
     /// [`crate::TlsStream::new`].
     pub fn new(io: S, server_name: &str, policy: &TrustPolicy) -> Result<Self, Error> {
         let config = build_client_config(policy)?;
+        let name = ServerName::try_from(server_name.to_string())
+            .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
+        let conn = ClientConnection::new(config, name)?;
+        Ok(Self { conn, io })
+    }
+
+    /// Like [`AsyncTlsStream::new`], but presents `client_cert_chain_der`
+    /// (leaf first, DER-encoded) and `client_key_der` (the leaf's private
+    /// key — PKCS#8, PKCS#1, or SEC1, auto-detected) to the server as a
+    /// client certificate — the async counterpart to
+    /// [`TlsStream::new_with_client_identity`](crate::TlsStream::new_with_client_identity).
+    pub fn new_with_client_identity(
+        io: S,
+        server_name: &str,
+        policy: &TrustPolicy,
+        client_cert_chain_der: Vec<Vec<u8>>,
+        client_key_der: Vec<u8>,
+    ) -> Result<Self, Error> {
+        let cert_chain: Vec<CertificateDer<'static>> = client_cert_chain_der
+            .into_iter()
+            .map(CertificateDer::from)
+            .collect();
+        let key = PrivateKeyDer::try_from(client_key_der)
+            .map_err(|reason| Error::InvalidPrivateKey(reason.to_string()))?;
+        let config = build_client_config_with_identity(policy, cert_chain, key)?;
         let name = ServerName::try_from(server_name.to_string())
             .map_err(|_| Error::InvalidServerName(server_name.to_string()))?;
         let conn = ClientConnection::new(config, name)?;

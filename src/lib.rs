@@ -9,16 +9,18 @@
 //!
 //! Client side: [`TlsStream`], a sync adapter layered over any
 //! `Read + Write` stream, plus [`TrustPolicy`], the one place trust
-//! decisions are made. Behind the `rusty-tokio` feature, [`AsyncTlsStream`]
-//! is the same thing over `rusty_tokio`'s `AsyncRead + AsyncWrite`.
+//! decisions are made. `new_with_client_identity` presents a client
+//! certificate (mTLS) to a server that requests one. Behind the
+//! `rusty-tokio` feature, [`AsyncTlsStream`] is the same thing over
+//! `rusty_tokio`'s `AsyncRead + AsyncWrite`.
 //!
 //! Server side: [`TlsAcceptor`] (a certificate + private key, built once)
 //! and [`TlsServerStream`], the sync per-connection wrapper it produces.
 //! Behind the `rusty-tokio` feature, [`AsyncTlsServerStream`] is the async
 //! counterpart, produced by [`TlsAcceptor::accept_async`]. No
-//! client-certificate authentication yet (matching the client side having no
-//! client-cert support) — see the crate's `ARCHITECTURE.md` for the full
-//! roadmap and what's deliberately not built.
+//! client-certificate *verification* yet on the server side (so mTLS isn't
+//! fully round-trippable through this crate alone yet) — see the crate's
+//! `ARCHITECTURE.md` for the full roadmap and what's deliberately not built.
 //!
 //! # Example
 //!

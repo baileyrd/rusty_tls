@@ -20,8 +20,9 @@ pub enum Error {
     /// silently running with a `RootCertStore` that trusts nothing (which
     /// would make every handshake fail anyway, just later and less clearly).
     NoTrustAnchors,
-    /// The private key handed to [`crate::TlsAcceptor::new`] isn't valid
-    /// DER in any recognized format (PKCS#8, PKCS#1, or SEC1).
+    /// A private key handed to [`crate::TlsAcceptor::new`] or a
+    /// client-identity constructor isn't valid DER in any recognized format
+    /// (PKCS#8, PKCS#1, or SEC1).
     InvalidPrivateKey(String),
 }
 
