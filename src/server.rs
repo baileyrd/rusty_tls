@@ -1,16 +1,16 @@
 //! Server-side TLS: accept connections presenting a certificate and
-//! private key.
+//! private key, optionally requiring and verifying a client certificate
+//! (mTLS) in turn.
 //!
-//! MVP scope matches the client side's: no client-certificate
-//! authentication (this crate stays no-mTLS on both sides), no ALPN, no
-//! session-resumption tuning. Add any of those behind their own opt-in
-//! surface if/when a named consumer needs one — none has yet.
+//! No ALPN, no session-resumption tuning yet. Add those behind their own
+//! opt-in surface if/when a named consumer needs one.
 
 use std::io::{self, Read, Write};
 use std::sync::Arc;
 
 use rustls::pki_types::{CertificateDer, PrivateKeyDer};
-use rustls::{ServerConfig, ServerConnection};
+use rustls::server::WebPkiClientVerifier;
+use rustls::{RootCertStore, ServerConfig, ServerConnection};
 
 use crate::error::Error;
 
@@ -36,6 +36,42 @@ impl TlsAcceptor {
             .map_err(|reason| Error::InvalidPrivateKey(reason.to_string()))?;
         let config = ServerConfig::builder()
             .with_no_client_auth()
+            .with_single_cert(cert_chain, key)?;
+        Ok(Self {
+            config: Arc::new(config),
+        })
+    }
+
+    /// Like [`TlsAcceptor::new`], but also requires and verifies a client
+    /// certificate (mTLS): `client_ca_roots_der` are the DER-encoded CA
+    /// certificates a presented client certificate must chain to. A
+    /// connection from a client that doesn't present a certificate, or
+    /// presents one that doesn't chain to any of these roots, fails the
+    /// handshake. Pairs with a client built via
+    /// [`TlsStream::new_with_client_identity`](crate::TlsStream::new_with_client_identity)
+    /// or its async counterpart.
+    pub fn new_with_client_auth(
+        cert_chain_der: Vec<Vec<u8>>,
+        private_key_der: Vec<u8>,
+        client_ca_roots_der: Vec<Vec<u8>>,
+    ) -> Result<Self, Error> {
+        let cert_chain: Vec<CertificateDer<'static>> = cert_chain_der
+            .into_iter()
+            .map(CertificateDer::from)
+            .collect();
+        let key = PrivateKeyDer::try_from(private_key_der)
+            .map_err(|reason| Error::InvalidPrivateKey(reason.to_string()))?;
+
+        let mut client_ca_roots = RootCertStore::empty();
+        for der in client_ca_roots_der {
+            client_ca_roots.add(CertificateDer::from(der))?;
+        }
+        let client_verifier = WebPkiClientVerifier::builder(Arc::new(client_ca_roots))
+            .build()
+            .map_err(|e| Error::InvalidClientCaRoots(e.to_string()))?;
+
+        let config = ServerConfig::builder()
+            .with_client_cert_verifier(client_verifier)
             .with_single_cert(cert_chain, key)?;
         Ok(Self {
             config: Arc::new(config),
