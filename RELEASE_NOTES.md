@@ -22,6 +22,34 @@ Tracked by PR against main, reverse chronological, one entry per merged PR.
 
 ---
 
+## Add `AsyncTlsServerStream`: async server-side TLS adapter (feature `rusty-tokio`)
+**2026-07-23**
+
+- **Added:** `AsyncTlsServerStream<S: AsyncRead + AsyncWrite>`, the async
+  counterpart to `TlsServerStream` — produced by the new
+  `TlsAcceptor::accept_async(io)`, driving the same sans-IO
+  `rustls::ServerConnection` over `rusty_tokio`'s poll-based I/O the way
+  `AsyncTlsStream` already does on the client side. Same lazy-handshake
+  shape, plus an async `complete_handshake()`.
+- **Context:** closes a gap tracked against `ARCHITECTURE.md`'s Non-goals
+  list (parity-loop run). Built without a confirmed live consumer today —
+  an explicit, requested exception to this project's usual consumer-gating
+  discipline, same as the sync server adapter's own history.
+- **Bug caught during implementation:** the first `complete_handshake`
+  draft reused the client adapter's `poll_complete_io` loop directly, which
+  exits only once `wants_read()` goes false — but that stays true
+  indefinitely on an idle, already-established connection (a live
+  connection always "wants" more incoming bytes). Awaited directly, that
+  loop would block forever past the point the handshake actually finished.
+  Fixed with a dedicated `poll_handshake` that checks `is_handshaking()`
+  before every I/O round instead, the same condition
+  `rustls::Connection::complete_io` uses internally for the sync adapters.
+- **Tests:** 2 new hermetic tests, including a full async-client-against-
+  async-server round trip. All 18 tests (7 sync client + 4 async client +
+  4 sync server + 2 async server + 1 doctest) passing; `cargo clippy
+  --all-targets --all-features -- -D warnings` and `cargo fmt --check`
+  both clean.
+
 ## Add server-side TLS: `TlsAcceptor`/`TlsServerStream`
 **2026-07-21**
 
